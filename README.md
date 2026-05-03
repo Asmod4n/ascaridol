@@ -36,7 +36,7 @@ git -C mruby-webview submodule update --init --recursive
    the JSON round-trip used by `bind` (and defines `MRB_UTF8_STRING`, which it
    requires).
 2. Invokes webview's official **CMake** project to build `libwebview.a`
-   (static, position-independent) into `<mruby-build>/mrbgems/mruby-webview/vendor/webview-build/`
+   (static, position-independent) into `<mruby-build>/mrbgems/mruby-webview/build/`
    and links the bindings against it. Override the source location with
    `MRUBY_WEBVIEW_DIR`, the cmake binary with `CMAKE`, and parallelism with
    `MRUBY_WEBVIEW_JOBS` or `JOBS`.

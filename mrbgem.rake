@@ -119,7 +119,7 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
           "Install cmake (>= 3.16) or set the CMAKE env var."
   end
 
-  webview_build_dir = File.join(spec.build_dir, 'vendor', 'webview-build')
+  webview_build_dir = File.join(spec.build_dir, 'build')
   lib_ext = is_windows && toolchains.include?('visualcpp') ? '.lib' : '.a'
   lib_name = is_windows && toolchains.include?('visualcpp') ? 'webview_static' : 'webview'
   webview_lib = File.join(webview_build_dir, 'core', "lib#{lib_name}#{lib_ext}")
