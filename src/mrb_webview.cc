@@ -149,15 +149,13 @@ static const struct mrb_data_type binding_ctx_type = {
 static binding_ctx *
 binding_ctx_new(mrb_state *mrb, mrb_webview_t *wv, mrb_sym name_sym,
                 mrb_value *out_data) {
-  binding_ctx *ctx = (binding_ctx *)mrb_malloc(mrb, sizeof(binding_ctx));
+  binding_ctx *ctx;
+  struct RData *data;
+  Data_Make_Struct(mrb, mrb->object_class, binding_ctx,
+                   &binding_ctx_type, ctx, data);
   ctx->wv = wv;
   ctx->name_sym = name_sym;
-  /* Wrap immediately so the struct's lifetime is owned by the GC. If the
-   * caller never roots the returned Data value (i.e. drops it on the
-   * floor), GC will collect it and binding_ctx_dfree will release the
-   * struct — no manual mrb_free path needed. */
-  *out_data = mrb_obj_value(
-    mrb_data_object_alloc(mrb, mrb->object_class, ctx, &binding_ctx_type));
+  *out_data = mrb_obj_value(data);
   return ctx;
 }
 
@@ -284,11 +282,13 @@ static const struct mrb_data_type dispatch_ctx_type = {
 static dispatch_ctx *
 dispatch_ctx_new(mrb_state *mrb, mrb_webview_t *wv, mrb_int key,
                  mrb_value *out_data) {
-  dispatch_ctx *ctx = (dispatch_ctx *)mrb_malloc(mrb, sizeof(dispatch_ctx));
+  dispatch_ctx *ctx;
+  struct RData *data;
+  Data_Make_Struct(mrb, mrb->object_class, dispatch_ctx,
+                   &dispatch_ctx_type, ctx, data);
   ctx->wv = wv;
   ctx->key = key;
-  *out_data = mrb_obj_value(
-    mrb_data_object_alloc(mrb, mrb->object_class, ctx, &dispatch_ctx_type));
+  *out_data = mrb_obj_value(data);
   return ctx;
 }
 
@@ -349,8 +349,33 @@ mrb_webview_free(mrb_state *mrb, void *p) {
 }
 
 /* ------------------------------------------------------------------------- */
-/* initialize / destroy                                                      */
+/* allocation / initialize / destroy                                         */
 /* ------------------------------------------------------------------------- */
+
+/* We override Class#new so the underlying mrb_webview_t is allocated via
+ * Data_Make_Struct (no direct mrb_malloc in our code). The default
+ * mrb_instance_alloc would hand `initialize` a Data object with a NULL
+ * data pointer and force it to mrb_malloc the struct itself. */
+static mrb_value
+mrb_webview_s_new(mrb_state *mrb, mrb_value klass) {
+  mrb_webview_t *wv;
+  struct RData *data;
+  Data_Make_Struct(mrb, mrb_class_ptr(klass), mrb_webview_t,
+                   &mrb_webview_data_type, wv, data);
+  mrb_value obj = mrb_obj_value(data);
+  wv->mrb = mrb;
+  wv->self = obj;
+  /* wv->handle is already NULL because Data_Make_Struct zero-fills. */
+
+  /* Forward the original positional args + block to initialize. */
+  mrb_value *argv;
+  mrb_int argc;
+  mrb_value blk;
+  mrb_get_args(mrb, "*&", &argv, &argc, &blk);
+  mrb_funcall_with_block(mrb, obj, mrb_intern_lit(mrb, "initialize"),
+                         argc, argv, blk);
+  return obj;
+}
 
 static mrb_value
 mrb_webview_m_initialize(mrb_state *mrb, mrb_value self) {
@@ -358,19 +383,14 @@ mrb_webview_m_initialize(mrb_state *mrb, mrb_value self) {
   mrb_value window_handle = mrb_nil_value();
   mrb_get_args(mrb, "|bo", &debug, &window_handle);
 
-  mrb_webview_t *wv = (mrb_webview_t *)DATA_PTR(self);
-  if (wv) {
-    if (wv->handle) {
-      webview_destroy(wv->handle);
-      wv->handle = NULL;
-    }
-  } else {
-    wv = (mrb_webview_t *)mrb_malloc(mrb, sizeof(mrb_webview_t));
+  mrb_webview_t *wv =
+    (mrb_webview_t *)mrb_data_get_ptr(mrb, self, &mrb_webview_data_type);
+
+  /* If initialize is called more than once, drop the previous handle. */
+  if (wv->handle) {
+    webview_destroy(wv->handle);
     wv->handle = NULL;
   }
-  wv->mrb = mrb;
-  wv->self = self;
-  mrb_data_init(self, wv, &mrb_webview_data_type);
 
   void *win = NULL;
   if (mrb_integer_p(window_handle)) {
@@ -660,6 +680,7 @@ mrb_mruby_webview_gem_init(mrb_state *mrb) {
   mrb_define_class_under(mrb, cls, "NotFoundError",          err);
   mrb_define_class_under(mrb, cls, "DestroyedError",         err);
 
+  mrb_define_class_method(mrb, cls, "new",   mrb_webview_s_new,           MRB_ARGS_ANY());
   mrb_define_method(mrb, cls, "initialize",   mrb_webview_m_initialize,   MRB_ARGS_OPT(2));
   mrb_define_method(mrb, cls, "destroy",      mrb_webview_m_destroy,      MRB_ARGS_NONE());
   mrb_define_method(mrb, cls, "destroyed?",   mrb_webview_m_destroyed_p,  MRB_ARGS_NONE());
