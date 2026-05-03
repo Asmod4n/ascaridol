@@ -17,9 +17,12 @@
 #include <mruby/value.h>
 #include <mruby/numeric.h>
 
-/* Use webview's header in declarations-only mode here. The implementation
- * is compiled exactly once via src/webview_impl.cc, which includes the same
- * header without WEBVIEW_HEADER defined. */
+/* The C API symbols (webview_create, webview_destroy, ...) live inside
+ * libwebview.a, which is built from vendor/webview via its official CMake
+ * project (see mrbgem.rake). Defining WEBVIEW_HEADER here gives us
+ * declarations only; WEBVIEW_STATIC (set in mrbgem.rake too) makes those
+ * declarations have plain `extern` linkage so they resolve at link time
+ * against the static library. */
 #define WEBVIEW_HEADER
 #include <webview/webview.h>
 

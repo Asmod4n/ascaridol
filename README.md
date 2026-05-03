@@ -35,10 +35,16 @@ git -C mruby-webview submodule update --init --recursive
 1. Pulls in [`mruby-fast-json`](https://github.com/asmod4n/mruby-fast-json) for
    the JSON round-trip used by `bind` (and defines `MRB_UTF8_STRING`, which it
    requires).
-2. Compiles `vendor/webview/core/src/webview.cc` with your toolchain's C++
-   compiler. Override the location with `MRUBY_WEBVIEW_DIR` if needed.
+2. Invokes webview's official **CMake** project to build `libwebview.a`
+   (static, position-independent) into `<mruby-build>/mrbgems/mruby-webview/vendor/webview-build/`
+   and links the bindings against it. Override the source location with
+   `MRUBY_WEBVIEW_DIR`, the cmake binary with `CMAKE`, and parallelism with
+   `MRUBY_WEBVIEW_JOBS` or `JOBS`.
 3. Detects platform libraries via `pkg-config` (Linux) or platform frameworks
    (macOS/Windows) and adds the right link flags.
+
+**Build prerequisites:** a C++ toolchain, `cmake >= 3.16`, `git`, and the
+platform's WebView dev packages (see below).
 
 ### System dependencies
 
