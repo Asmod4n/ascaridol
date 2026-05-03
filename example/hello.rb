@@ -23,11 +23,11 @@ html = <<~HTML
 HTML
 
 Webview.open(title: 'mruby-webview demo', size: [640, 480, :none], debug: true) do |w|
-  w.bind('greet') do |name|
+  w.bind(:greet) do |name|
     "Hello, #{name}! (replied at #{Time.now rescue 'now'})"
   end
 
-  w.bind('quit') { w.terminate }
+  w.bind(:quit) { w.terminate }
 
   w.html = html
 end

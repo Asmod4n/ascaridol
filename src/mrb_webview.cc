@@ -22,6 +22,7 @@
 #include <mruby/value.h>
 #include <mruby/numeric.h>
 
+#include <mruby/num_helpers.hpp>
 #include <mruby/cpp_helpers.hpp>
 #include <mruby/fast_json.h>
 
@@ -148,8 +149,7 @@ bind_invoke_body(mrb_state *mrb, void *p) {
   auto *s = static_cast<bind_step *>(p);
   mrb_int argc = RARRAY_LEN(s->parsed);
   mrb_value *argv = RARRAY_PTR(s->parsed);
-  return mrb_funcall_with_block(mrb, s->proc, MRB_SYM(call),
-                                   argc, argv, mrb_nil_value());
+  return mrb_yield_argv(mrb, s->proc, argc, argv);
 }
 
 static mrb_value
@@ -235,8 +235,7 @@ invoke_bound_proc(mrb_state *mrb, mrb_value self, mrb_sym name_sym,
 static mrb_value
 dispatch_invoke_body(mrb_state *mrb, void *p) {
   mrb_value proc = *static_cast<mrb_value *>(p);
-  return mrb_funcall_with_block(mrb, proc, MRB_SYM(call),
-                                   0, nullptr, mrb_nil_value());
+  return mrb_yield(mrb, proc, mrb_nil_value());
 }
 
 static void
@@ -244,12 +243,12 @@ invoke_dispatched_proc(mrb_state *mrb, mrb_value self, mrb_int key) {
   int ai = mrb_gc_arena_save(mrb);
 
   mrb_value dh = DISPATCH_HASH(mrb, self);
-  mrb_value k = mrb_int_value(mrb, key);
+  mrb_value k = mrb_convert_number(mrb, key);
   mrb_value proc = mrb_hash_get(mrb, dh, k);
   if (!mrb_nil_p(proc)) {
-    /* Errors are silently swallowed: nobody to propagate them to. */
     mrb_bool err = FALSE;
     mrb_protect_error(mrb, dispatch_invoke_body, &proc, &err);
+    if (err) mrb_print_error(mrb);
   }
   mrb_hash_delete_key(mrb, dh, k);
   mrb_gc_arena_restore(mrb, ai);
@@ -341,12 +340,27 @@ mrb_webview_m_set_title(mrb_state *mrb, mrb_value self) {
   return self;
 }
 
+static webview_hint_t
+hint_from_mrb(mrb_state *mrb, mrb_value v) {
+  if (mrb_nil_p(v))     return WEBVIEW_HINT_NONE;
+  if (mrb_symbol_p(v)) {
+    mrb_sym s = mrb_symbol(v);
+    if (s == MRB_SYM(none))  return WEBVIEW_HINT_NONE;
+    if (s == MRB_SYM(min))   return WEBVIEW_HINT_MIN;
+    if (s == MRB_SYM(max))   return WEBVIEW_HINT_MAX;
+    if (s == MRB_SYM(fixed)) return WEBVIEW_HINT_FIXED;
+    mrb_raisef(mrb, E_ARGUMENT_ERROR, "unknown size hint: %v", v);
+  }
+  mrb_raise(mrb, E_ARGUMENT_ERROR, "size hint must be a Symbol");
+}
+
 static mrb_value
 mrb_webview_m_set_size(mrb_state *mrb, mrb_value self) {
-  mrb_int w, h, hint = WEBVIEW_HINT_NONE;
-  mrb_get_args(mrb, "ii|i", &w, &h, &hint);
+  mrb_int w, h;
+  mrb_value hint_v = mrb_nil_value();
+  mrb_get_args(mrb, "ii|o", &w, &h, &hint_v);
   webview_check_result(mrb, get_webview(mrb, self)->set_size(
-    static_cast<int>(w), static_cast<int>(h), static_cast<webview_hint_t>(hint)));
+    static_cast<int>(w), static_cast<int>(h), hint_from_mrb(mrb, hint_v)));
   return self;
 }
 
@@ -399,29 +413,38 @@ mrb_webview_m_window_handle(mrb_state *mrb, mrb_value self) {
   auto r = get_webview(mrb, self)->window();
   if (!r.ok()) return mrb_nil_value();
   void *p = r.value();
-  return p ? mrb_int_value(mrb, static_cast<mrb_int>(reinterpret_cast<uintptr_t>(p)))
+  return p ? mrb_cptr_value(mrb, p)
            : mrb_nil_value();
+}
+
+static webview_native_handle_kind_t
+handle_kind_from_mrb(mrb_state *mrb, mrb_value v) {
+  if (mrb_symbol_p(v)) {
+    mrb_sym s = mrb_symbol(v);
+    if (s == MRB_SYM(window))             return WEBVIEW_NATIVE_HANDLE_KIND_UI_WINDOW;
+    if (s == MRB_SYM(widget))             return WEBVIEW_NATIVE_HANDLE_KIND_UI_WIDGET;
+    if (s == MRB_SYM(browser_controller)) return WEBVIEW_NATIVE_HANDLE_KIND_BROWSER_CONTROLLER;
+    mrb_raisef(mrb, E_ARGUMENT_ERROR, "unknown handle kind: %v", v);
+  }
+  mrb_raise(mrb, E_ARGUMENT_ERROR, "handle kind must be a Symbol");
 }
 
 static mrb_value
 mrb_webview_m_native_handle(mrb_state *mrb, mrb_value self) {
   webview::webview *wv = get_webview(mrb, self);
-  mrb_int kind = WEBVIEW_NATIVE_HANDLE_KIND_UI_WINDOW;
-  mrb_get_args(mrb, "|i", &kind);
+  mrb_value kind_v = mrb_symbol_value(MRB_SYM(window));
+  mrb_get_args(mrb, "|o", &kind_v);
 
   void *p = nullptr;
-  switch (static_cast<webview_native_handle_kind_t>(kind)) {
-    case WEBVIEW_NATIVE_HANDLE_KIND_UI_WINDOW: {
-      auto r = wv->window();           if (r.ok()) p = r.value(); break;
-    }
-    case WEBVIEW_NATIVE_HANDLE_KIND_UI_WIDGET: {
-      auto r = wv->widget();           if (r.ok()) p = r.value(); break;
-    }
-    case WEBVIEW_NATIVE_HANDLE_KIND_BROWSER_CONTROLLER: {
-      auto r = wv->browser_controller(); if (r.ok()) p = r.value(); break;
-    }
+  switch (handle_kind_from_mrb(mrb, kind_v)) {
+    case WEBVIEW_NATIVE_HANDLE_KIND_UI_WINDOW:
+      { auto r = wv->window();              if (r.ok()) p = r.value(); break; }
+    case WEBVIEW_NATIVE_HANDLE_KIND_UI_WIDGET:
+      { auto r = wv->widget();              if (r.ok()) p = r.value(); break; }
+    case WEBVIEW_NATIVE_HANDLE_KIND_BROWSER_CONTROLLER:
+      { auto r = wv->browser_controller(); if (r.ok()) p = r.value(); break; }
   }
-  return p ? mrb_int_value(mrb, static_cast<mrb_int>(reinterpret_cast<uintptr_t>(p)))
+  return p ? mrb_cptr_value(mrb, p)
            : mrb_nil_value();
 }
 
@@ -432,15 +455,13 @@ mrb_webview_m_native_handle(mrb_state *mrb, mrb_value self) {
 static mrb_value
 mrb_webview_m_bind(mrb_state *mrb, mrb_value self) {
   webview::webview *wv = get_webview(mrb, self);
-  const char *name;
-  mrb_int name_len;
+  mrb_sym name_sym;
   mrb_value blk = mrb_nil_value();
-  mrb_get_args(mrb, "s&", &name, &name_len, &blk);
+  mrb_get_args(mrb, "n&", &name_sym, &blk);
   if (mrb_nil_p(blk)) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "bind requires a block");
   }
 
-  mrb_sym name_sym = mrb_intern(mrb, name, name_len);
   mrb_value bh = BINDINGS_HASH(mrb, self);
 
   /* Re-bind on an already-registered name: just swap the proc — webview
@@ -455,6 +476,8 @@ mrb_webview_m_bind(mrb_state *mrb, mrb_value self) {
    * GC-rooted while the binding is live. The lambda outlives nothing it
    * captures: webview destroys all bindings in its destructor, which
    * runs before the wrapping Webview Data instance dies. */
+  mrb_int name_len;
+  const char *name = mrb_sym_name_len(mrb, name_sym, &name_len);
   std::string name_str{name, static_cast<size_t>(name_len)};
   auto err = wv->bind(name_str,
     [mrb, self, name_sym, wv](std::string id, std::string req, void *) {
@@ -470,13 +493,14 @@ mrb_webview_m_bind(mrb_state *mrb, mrb_value self) {
 static mrb_value
 mrb_webview_m_unbind(mrb_state *mrb, mrb_value self) {
   webview::webview *wv = get_webview(mrb, self);
-  const char *name;
-  mrb_int name_len;
-  mrb_get_args(mrb, "s", &name, &name_len);
+  mrb_sym name_sym;
+  mrb_get_args(mrb, "n", &name_sym);
 
+  mrb_int name_len;
+  const char *name = mrb_sym_name_len(mrb, name_sym, &name_len);
   webview_check_result(mrb, wv->unbind(
     std::string{name, static_cast<size_t>(name_len)}));
-  mrb_sym name_sym = mrb_intern(mrb, name, name_len);
+
   mrb_hash_delete_key(mrb, BINDINGS_HASH(mrb, self), mrb_symbol_value(name_sym));
   return self;
 }
@@ -512,9 +536,9 @@ mrb_webview_m_dispatch(mrb_state *mrb, mrb_value self) {
   mrb_value counter_v = mrb_iv_get(mrb, self, MRB_SYM(dispatch_counter));
   mrb_int counter = mrb_integer_p(counter_v) ? mrb_integer(counter_v) : 0;
   counter++;
-  mrb_iv_set(mrb, self, MRB_SYM(dispatch_counter), mrb_int_value(mrb, counter));
+  mrb_iv_set(mrb, self, MRB_SYM(dispatch_counter), mrb_convert_number(mrb, counter));
 
-  mrb_value key = mrb_int_value(mrb, counter);
+  mrb_value key = mrb_convert_number(mrb, counter);
   mrb_hash_set(mrb, dh, key, blk);
 
   /* webview holds the std::function in its dispatch queue, calls it once
@@ -541,11 +565,11 @@ mrb_webview_s_version(mrb_state *mrb, mrb_value self) {
   const webview_version_info_t *info = webview_version();
   mrb_value h = mrb_hash_new(mrb);
   mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(major)),
-               mrb_int_value(mrb, info->version.major));
+               mrb_convert_number(mrb, info->version.major));
   mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(minor)),
-               mrb_int_value(mrb, info->version.minor));
+               mrb_convert_number(mrb, info->version.minor));
   mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(patch)),
-               mrb_int_value(mrb, info->version.patch));
+               mrb_convert_number(mrb, info->version.patch));
   mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(version)),
                mrb_str_new_cstr(mrb, info->version_number));
   mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(pre_release)),
@@ -564,14 +588,14 @@ mrb_mruby_webview_gem_init(mrb_state *mrb) {
   struct RClass *cls = mrb_define_class_id(mrb, MRB_SYM(Webview), mrb->object_class);
   MRB_SET_INSTANCE_TT(cls, MRB_TT_CDATA);
 
-  struct RClass *err = mrb_define_class_under(mrb, cls, "Error", E_RUNTIME_ERROR);
-  mrb_define_class_under(mrb, cls, "MissingDependencyError", err);
-  mrb_define_class_under(mrb, cls, "CanceledError",          err);
-  mrb_define_class_under(mrb, cls, "InvalidStateError",      err);
-  mrb_define_class_under(mrb, cls, "InvalidArgumentError",   err);
-  mrb_define_class_under(mrb, cls, "DuplicateError",         err);
-  mrb_define_class_under(mrb, cls, "NotFoundError",          err);
-  mrb_define_class_under(mrb, cls, "DestroyedError",         err);
+  struct RClass *err = mrb_define_class_under_id(mrb, cls, MRB_SYM(Error), E_RUNTIME_ERROR);
+  mrb_define_class_under_id(mrb, cls, MRB_SYM(MissingDependencyError), err);
+  mrb_define_class_under_id(mrb, cls, MRB_SYM(CanceledError),          err);
+  mrb_define_class_under_id(mrb, cls, MRB_SYM(InvalidStateError),      err);
+  mrb_define_class_under_id(mrb, cls, MRB_SYM(InvalidArgumentError),   err);
+  mrb_define_class_under_id(mrb, cls, MRB_SYM(DuplicateError),         err);
+  mrb_define_class_under_id(mrb, cls, MRB_SYM(NotFoundError),          err);
+  mrb_define_class_under_id(mrb, cls, MRB_SYM(DestroyedError),         err);
 
   mrb_define_method_id(mrb, cls, MRB_SYM(initialize),    mrb_webview_m_initialize,    MRB_ARGS_OPT(2));
   mrb_define_method_id(mrb, cls, MRB_SYM(destroy),       mrb_webview_m_destroy,       MRB_ARGS_NONE());
@@ -591,7 +615,7 @@ mrb_mruby_webview_gem_init(mrb_state *mrb) {
   mrb_define_method_id(mrb, cls, MRB_SYM(eval_script),   mrb_webview_m_eval,          MRB_ARGS_REQ(1));
 
   mrb_define_method_id(mrb, cls, MRB_SYM(window_handle), mrb_webview_m_window_handle, MRB_ARGS_NONE());
-  mrb_define_method_id(mrb, cls, MRB_SYM(native_handle), mrb_webview_m_native_handle, MRB_ARGS_OPT(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM(handle), mrb_webview_m_native_handle, MRB_ARGS_OPT(1));
 
   mrb_define_method_id(mrb, cls, MRB_SYM(_bind_native),  mrb_webview_m_bind,          MRB_ARGS_REQ(1) | MRB_ARGS_BLOCK());
   mrb_define_method_id(mrb, cls, MRB_SYM(unbind),        mrb_webview_m_unbind,        MRB_ARGS_REQ(1));
@@ -600,18 +624,6 @@ mrb_mruby_webview_gem_init(mrb_state *mrb) {
   mrb_define_method_id(mrb, cls, MRB_SYM(dispatch),      mrb_webview_m_dispatch,      MRB_ARGS_BLOCK());
 
   mrb_define_class_method_id(mrb, cls, MRB_SYM(version), mrb_webview_s_version,       MRB_ARGS_NONE());
-
-  mrb_define_const_id(mrb, cls, MRB_SYM(HINT_NONE),  mrb_int_value(mrb, WEBVIEW_HINT_NONE));
-  mrb_define_const_id(mrb, cls, MRB_SYM(HINT_MIN),   mrb_int_value(mrb, WEBVIEW_HINT_MIN));
-  mrb_define_const_id(mrb, cls, MRB_SYM(HINT_MAX),   mrb_int_value(mrb, WEBVIEW_HINT_MAX));
-  mrb_define_const_id(mrb, cls, MRB_SYM(HINT_FIXED), mrb_int_value(mrb, WEBVIEW_HINT_FIXED));
-
-  mrb_define_const_id(mrb, cls, MRB_SYM(NATIVE_HANDLE_UI_WINDOW),
-                      mrb_int_value(mrb, WEBVIEW_NATIVE_HANDLE_KIND_UI_WINDOW));
-  mrb_define_const_id(mrb, cls, MRB_SYM(NATIVE_HANDLE_UI_WIDGET),
-                      mrb_int_value(mrb, WEBVIEW_NATIVE_HANDLE_KIND_UI_WIDGET));
-  mrb_define_const_id(mrb, cls, MRB_SYM(NATIVE_HANDLE_BROWSER_CONTROLLER),
-                      mrb_int_value(mrb, WEBVIEW_NATIVE_HANDLE_KIND_BROWSER_CONTROLLER));
 }
 
 void

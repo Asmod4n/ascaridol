@@ -3,26 +3,6 @@
 # mruby-webview: idiomatic Ruby bindings for webview/webview.
 
 class Webview
-  module SizeHint
-    NONE  = HINT_NONE
-    MIN   = HINT_MIN
-    MAX   = HINT_MAX
-    FIXED = HINT_FIXED
-  end
-
-  HINTS = {
-    none:  HINT_NONE,
-    min:   HINT_MIN,
-    max:   HINT_MAX,
-    fixed: HINT_FIXED
-  }.freeze
-
-  HANDLES = {
-    window:             NATIVE_HANDLE_UI_WINDOW,
-    widget:             NATIVE_HANDLE_UI_WIDGET,
-    browser_controller: NATIVE_HANDLE_BROWSER_CONTROLLER
-  }.freeze
-
   class << self
     # Create, configure and run a Webview in one block. The window is destroyed
     # when the block exits, even on exception.
@@ -52,17 +32,10 @@ class Webview
     self.title = title if title
     if size
       w, h, hint = size
-      set_size(w, h, _hint_value(hint || :none))
+      set_size(w, h, hint)
     end
     self.url  = url  if url
     self.html = html if html
-  end
-
-  # Set window size with an optional symbolic hint.
-  alias _native_set_size set_size
-  def set_size(width, height, hint = :none)
-    _native_set_size(width, height, _hint_value(hint))
-    self
   end
 
   # Bind a Ruby block to a JavaScript function name.
@@ -95,33 +68,8 @@ class Webview
   alias evaluate eval_script
   alias init_js init_script
 
-  # Returns the native handle for the given kind (`:window`, `:widget`,
-  # `:browser_controller`) as an Integer pointer.
-  def handle(kind = :window)
-    native_handle(_handle_kind(kind))
-  end
-
   def to_s
     "#<Webview destroyed=#{destroyed?}>"
   end
   alias inspect to_s
-
-  private
-
-  def _hint_value(hint)
-    case hint
-    when Symbol then HINTS.fetch(hint) { raise ArgumentError, "unknown size hint: #{hint.inspect}" }
-    when Integer then hint
-    when nil then HINT_NONE
-    else raise ArgumentError, "size hint must be a Symbol or Integer"
-    end
-  end
-
-  def _handle_kind(kind)
-    case kind
-    when Symbol then HANDLES.fetch(kind) { raise ArgumentError, "unknown handle kind: #{kind.inspect}" }
-    when Integer then kind
-    else raise ArgumentError, "handle kind must be a Symbol or Integer"
-    end
-  end
 end
