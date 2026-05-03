@@ -137,6 +137,30 @@ typedef struct binding_ctx {
   mrb_sym name_sym;
 } binding_ctx;
 
+static void
+binding_ctx_dfree(mrb_state *mrb, void *p) {
+  if (p) mrb_free(mrb, p);
+}
+
+static const struct mrb_data_type binding_ctx_type = {
+  "Webview::BindingCtx", binding_ctx_dfree
+};
+
+static binding_ctx *
+binding_ctx_new(mrb_state *mrb, mrb_webview_t *wv, mrb_sym name_sym,
+                mrb_value *out_data) {
+  binding_ctx *ctx = (binding_ctx *)mrb_malloc(mrb, sizeof(binding_ctx));
+  ctx->wv = wv;
+  ctx->name_sym = name_sym;
+  /* Wrap immediately so the struct's lifetime is owned by the GC. If the
+   * caller never roots the returned Data value (i.e. drops it on the
+   * floor), GC will collect it and binding_ctx_dfree will release the
+   * struct — no manual mrb_free path needed. */
+  *out_data = mrb_obj_value(
+    mrb_data_object_alloc(mrb, mrb->object_class, ctx, &binding_ctx_type));
+  return ctx;
+}
+
 static mrb_value
 make_error_json(mrb_state *mrb, const char *name, mrb_value message) {
   mrb_value err = mrb_hash_new(mrb);
@@ -248,6 +272,26 @@ typedef struct dispatch_ctx {
   mrb_int key;
 } dispatch_ctx;
 
+static void
+dispatch_ctx_dfree(mrb_state *mrb, void *p) {
+  if (p) mrb_free(mrb, p);
+}
+
+static const struct mrb_data_type dispatch_ctx_type = {
+  "Webview::DispatchCtx", dispatch_ctx_dfree
+};
+
+static dispatch_ctx *
+dispatch_ctx_new(mrb_state *mrb, mrb_webview_t *wv, mrb_int key,
+                 mrb_value *out_data) {
+  dispatch_ctx *ctx = (dispatch_ctx *)mrb_malloc(mrb, sizeof(dispatch_ctx));
+  ctx->wv = wv;
+  ctx->key = key;
+  *out_data = mrb_obj_value(
+    mrb_data_object_alloc(mrb, mrb->object_class, ctx, &dispatch_ctx_type));
+  return ctx;
+}
+
 static mrb_value
 dispatch_invoke_body(mrb_state *mrb, void *p) {
   mrb_value proc = *(mrb_value *)p;
@@ -267,18 +311,24 @@ dispatch_callback(webview_t w, void *arg) {
 
   mrb_value dh = DISPATCH_HASH(mrb, self);
   mrb_value key = mrb_int_value(mrb, ctx->key);
-  mrb_value proc = mrb_hash_get(mrb, dh, key);
+  /* The hash entry is a [proc, ctx_data] pair: the proc keeps the user's
+   * block alive, the ctx_data Data wrapper keeps `ctx` itself alive. */
+  mrb_value pair = mrb_hash_get(mrb, dh, key);
 
-  if (!mrb_nil_p(proc)) {
-    /* Errors in dispatch blocks are silently swallowed: there's no caller
-     * to propagate them to. mrb_protect_error captures the exception (and
-     * clears mrb->exc) so the rest of the run loop is unaffected. */
-    mrb_bool err = FALSE;
-    mrb_protect_error(mrb, dispatch_invoke_body, &proc, &err);
+  if (mrb_array_p(pair) && RARRAY_LEN(pair) >= 1) {
+    mrb_value proc = RARRAY_PTR(pair)[0];
+    if (!mrb_nil_p(proc)) {
+      /* Errors in dispatch blocks are silently swallowed: there's no caller
+       * to propagate them to. mrb_protect_error captures the exception (and
+       * clears mrb->exc) so the rest of the run loop is unaffected. */
+      mrb_bool err = FALSE;
+      mrb_protect_error(mrb, dispatch_invoke_body, &proc, &err);
+    }
   }
 
+  /* Drop the last reference to the dispatch_ctx Data wrapper. GC will
+   * call dispatch_ctx_dfree to release the struct on its next sweep. */
   mrb_hash_delete_key(mrb, dh, key);
-  mrb_free(mrb, ctx);
   mrb_gc_arena_restore(mrb, ai);
 }
 
@@ -337,27 +387,20 @@ mrb_webview_m_initialize(mrb_state *mrb, mrb_value self) {
   return self;
 }
 
-static void
-free_all_binding_ctxs(mrb_state *mrb, mrb_value self) {
-  mrb_value ch = mrb_iv_get(mrb, self, mrb_intern_lit(mrb, "@_binding_ctxs"));
-  if (!mrb_hash_p(ch)) return;
-  mrb_value keys = mrb_hash_keys(mrb, ch);
-  for (mrb_int i = 0; i < RARRAY_LEN(keys); i++) {
-    mrb_value v = mrb_hash_get(mrb, ch, RARRAY_PTR(keys)[i]);
-    if (mrb_cptr_p(v)) {
-      mrb_free(mrb, mrb_cptr(v));
-    }
-  }
-  mrb_iv_remove(mrb, self, mrb_intern_lit(mrb, "@_binding_ctxs"));
-}
-
 static mrb_value
 mrb_webview_m_destroy(mrb_state *mrb, mrb_value self) {
   mrb_webview_t *wv = (mrb_webview_t *)DATA_PTR(self);
   if (wv && wv->handle) {
-    free_all_binding_ctxs(mrb, self);
+    /* webview_destroy unbinds every C callback, so the binding_ctx /
+     * dispatch_ctx pointers we passed via webview_bind / webview_dispatch
+     * are no longer used. Removing the iv hashes drops the last
+     * references to their Data wrappers; GC reclaims them on its next
+     * sweep and runs the dfree functions to release the structs. */
     webview_destroy(wv->handle);
     wv->handle = NULL;
+    mrb_iv_remove(mrb, self, mrb_intern_lit(mrb, "@_bindings"));
+    mrb_iv_remove(mrb, self, mrb_intern_lit(mrb, "@_binding_ctxs"));
+    mrb_iv_remove(mrb, self, mrb_intern_lit(mrb, "@_dispatch_procs"));
   }
   return mrb_nil_value();
 }
@@ -487,24 +530,19 @@ mrb_webview_m_bind(mrb_state *mrb, mrb_value self) {
 
   mrb_value ch = CTXS_HASH(mrb, self);
   mrb_value existing = mrb_hash_get(mrb, ch, name_v);
-  binding_ctx *ctx;
-  mrb_bool fresh = FALSE;
-  if (mrb_cptr_p(existing)) {
-    ctx = (binding_ctx *)mrb_cptr(existing);
-  } else {
-    ctx = (binding_ctx *)mrb_malloc(mrb, sizeof(binding_ctx));
-    ctx->wv = wv;
-    ctx->name_sym = name_sym;
-    fresh = TRUE;
+  binding_ctx *ctx = (binding_ctx *)mrb_data_check_get_ptr(mrb, existing, &binding_ctx_type);
+  mrb_bool fresh = !ctx;
+  if (fresh) {
+    mrb_value ctx_data;
+    ctx = binding_ctx_new(mrb, wv, name_sym, &ctx_data);
+    mrb_hash_set(mrb, ch, name_v, ctx_data);
   }
 
   webview_error_t err = webview_bind(wv->handle, name, binding_callback, ctx);
   if (err != WEBVIEW_ERROR_OK) {
-    if (fresh) mrb_free(mrb, ctx);
+    /* Drop the just-stored Data; GC will reclaim the struct. */
+    if (fresh) mrb_hash_delete_key(mrb, ch, name_v);
     mrb_webview_check(mrb, err);
-  }
-  if (fresh) {
-    mrb_hash_set(mrb, ch, name_v, mrb_cptr_value(mrb, ctx));
   }
   mrb_hash_set(mrb, bh, name_v, blk);
   return self;
@@ -522,12 +560,9 @@ mrb_webview_m_unbind(mrb_state *mrb, mrb_value self) {
   mrb_value name_v = mrb_symbol_value(name_sym);
   mrb_hash_delete_key(mrb, BINDINGS_HASH(mrb, self), name_v);
 
-  mrb_value ch = CTXS_HASH(mrb, self);
-  mrb_value v = mrb_hash_get(mrb, ch, name_v);
-  if (mrb_cptr_p(v)) {
-    mrb_free(mrb, mrb_cptr(v));
-    mrb_hash_delete_key(mrb, ch, name_v);
-  }
+  /* GC will free the binding_ctx struct via the Data wrapper once we drop
+   * the last reference to it (the entry in @_binding_ctxs). */
+  mrb_hash_delete_key(mrb, CTXS_HASH(mrb, self), name_v);
   return self;
 }
 
@@ -563,16 +598,21 @@ mrb_webview_m_dispatch(mrb_state *mrb, mrb_value self) {
   mrb_iv_set(mrb, self, mrb_intern_lit(mrb, "@_dispatch_counter"), mrb_int_value(mrb, counter));
   mrb_value key = mrb_int_value(mrb, counter);
 
-  dispatch_ctx *ctx = (dispatch_ctx *)mrb_malloc(mrb, sizeof(dispatch_ctx));
-  ctx->wv = wv;
-  ctx->key = counter;
-
-  mrb_hash_set(mrb, dh, key, blk);
+  /* Allocate dispatch_ctx wrapped in a Data wrapper so the GC owns its
+   * lifetime. Stash both the user's block and the Data wrapper in the
+   * hash under the counter key, so both stay rooted while the dispatch
+   * is in flight. The C side gets the inner struct pointer. */
+  mrb_value ctx_data;
+  dispatch_ctx *ctx = dispatch_ctx_new(mrb, wv, counter, &ctx_data);
+  mrb_value pair = mrb_ary_new_capa(mrb, 2);
+  mrb_ary_push(mrb, pair, blk);
+  mrb_ary_push(mrb, pair, ctx_data);
+  mrb_hash_set(mrb, dh, key, pair);
 
   webview_error_t err = webview_dispatch(wv->handle, dispatch_callback, ctx);
   if (err != WEBVIEW_ERROR_OK) {
+    /* Dropping the entry releases both the proc and the ctx Data to GC. */
     mrb_hash_delete_key(mrb, dh, key);
-    mrb_free(mrb, ctx);
     mrb_webview_check(mrb, err);
   }
   return self;
