@@ -203,3 +203,20 @@ Webview::Error
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Running with AddressSanitizer / LeakSanitizer
+
+WebKitGTK, JavaScriptCore, fontconfig, Mesa and Pango all keep
+process-lifetime singletons (interned atom strings, GType registrations,
+EGL contexts, font caches) that are never freed. LSan reports them as
+leaks at process exit even though they aren't bugs.
+
+A suppressions file is shipped at [`lsan.supp`](lsan.supp). Point LSan at
+it when you run a sanitized binary:
+
+```sh
+LSAN_OPTIONS="suppressions=$(pwd)/lsan.supp" ./mruby/bin/mruby example/hello.rb
+```
+
+Anything that comes back after that is genuinely from your code (or
+mruby-webview) — please file a bug if you see one.

@@ -1,0 +1,37 @@
+# LeakSanitizer suppressions for mruby-webview.
+#
+# These suppress process-lifetime leaks from upstream libraries that
+# webview/webview pulls in (WebKitGTK, JavaScriptCore, fontconfig, Mesa,
+# Pango, GLib's type system). They are not bugs in mruby-webview — the
+# allocations are made once during library initialization and intentionally
+# kept alive for the rest of the process lifetime (singletons, interned
+# atom strings, GType registrations, EGL contexts, font config caches).
+#
+# Usage:
+#   LSAN_OPTIONS="suppressions=$(pwd)/lsan.supp" ./mruby/bin/mruby example/hello.rb
+#
+# The LSan match is per-frame, so any allocation whose stack passes through
+# one of these libraries / symbols is suppressed.
+#
+# WebKit / JavaScriptCore: process-lifetime singletons and atom strings.
+leak:libwebkit2gtk
+leak:libjavascriptcoregtk
+leak:WTF::AtomStringImpl
+leak:WTF::StringImpl
+leak:JSC::JSGlobalObject
+
+# fontconfig: one-shot pattern / language-set caches.
+leak:libfontconfig
+leak:FcValueSave
+leak:FcLangSetCopy
+leak:FcPatternAdd
+leak:FcFontRenderPrepare
+
+# Mesa EGL driver state.
+leak:libEGL_mesa
+
+# Pango / Cairo font caches.
+leak:libpangocairo
+
+# GLib's GType system one-time class init reached via pthread_once.
+leak:g_type_class_get
