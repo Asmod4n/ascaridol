@@ -343,8 +343,11 @@ mrb_webview_m_set_size(mrb_state *mrb, mrb_value self) {
   mrb_int w, h;
   mrb_value hint_v = mrb_nil_value();
   mrb_get_args(mrb, "ii|o", &w, &h, &hint_v);
-  webview_check_result(mrb, get_webview(mrb, self)->set_size(
-    static_cast<int>(w), static_cast<int>(h), hint_from_mrb(mrb, hint_v)));
+  webview::webview *wv = get_webview(mrb, self);
+  webview_hint_t hint = hint_from_mrb(mrb, hint_v);
+
+
+  webview_check_result(mrb, wv->set_size(static_cast<int>(w), static_cast<int>(h), hint));
   return self;
 }
 

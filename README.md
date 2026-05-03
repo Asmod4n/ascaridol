@@ -25,7 +25,7 @@ is compiled into the gem; no CMake needed.
 ## Hello world
 
 ```ruby
-Webview.open(title: 'Demo', size: [640, 480, :fixed]) do |w|
+Webview.open(title: 'Demo', size: [640, 480]) do |w|
   w.bind('greet') { |name| "Hello, #{name}!" }
   w.html = <<~HTML
     <button onclick="greet('world').then(r => document.body.innerText = r)">Hi</button>
@@ -39,7 +39,7 @@ end
 w = Webview.new(debug: false, title: nil, size: nil, url: nil, html: nil)
 
 w.title = 'My App'
-w.set_size(800, 600, :fixed)   # :none / :min / :max / :fixed
+w.set_size(800, 600)   # :none / :min / :max
 w.url  = 'https://example.com'
 w.html = '<h1>hi</h1>'
 w.init_script(js)              # runs on every navigation

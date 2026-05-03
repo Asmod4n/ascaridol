@@ -195,7 +195,7 @@ HTMX_HOOK = <<~'JS'
   </script>
 JS
 
-Webview.open(title: "htmx x mruby", size: [680, 440], debug: true) do |w|
+Webview.open(title: "htmx x mruby", size: [800, 600], debug: true) do |w|
   w.bind(:htmx_route) { |method, path, params| route(method, path, params) }
   w.html = render_page
 end
