@@ -54,8 +54,30 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
   end
   spec.objs << webview_obj
 
-  case RUBY_PLATFORM
-  when /linux|bsd/
+  # Detect the *target* platform we're building mruby for. mrbgem.rake runs
+  # under CRuby, so RUBY_PLATFORM would describe the host (and break
+  # cross-compilation). Inspect the build's toolchain and the target triple
+  # of MRuby::CrossBuild instead.
+  build = spec.build
+  toolchains = Array(build.respond_to?(:toolchains) ? build.toolchains : [])
+  cc_command = build.cc.command.to_s
+  host_target = build.respond_to?(:host_target) ? build.host_target.to_s : ''
+
+  is_windows = toolchains.include?('visualcpp') ||
+               host_target =~ /mingw|cygwin|msys|win32|windows/i ||
+               cc_command  =~ /(?:^|[\/\\-])(?:mingw|w64|cl)(?:\.exe|$|[-.])/i
+  is_darwin  = host_target =~ /darwin|apple|mac/i ||
+               cc_command  =~ /apple|darwin/i ||
+               (host_target.empty? && !is_windows && `uname -s 2>/dev/null`.strip == 'Darwin')
+
+  if is_windows
+    spec.linker.libraries.concat(%w[advapi32 ole32 shell32 shlwapi user32 version])
+    spec.cxx.flags << '-DWEBVIEW_EDGE'
+  elsif is_darwin
+    spec.linker.flags_after_libraries.concat(%w[-framework WebKit -framework Cocoa])
+    spec.linker.libraries << 'c++'
+  else
+    # Linux / *BSD — discover GTK + WebKitGTK via pkg-config.
     pkg = ENV['MRUBY_WEBVIEW_PKG']
     pkg ||= %w[gtk4 webkitgtk-6.0].all? { |p| system("pkg-config --exists #{p}") } ? 'gtk4 webkitgtk-6.0' : nil
     pkg ||= %w[gtk+-3.0 webkit2gtk-4.1].all? { |p| system("pkg-config --exists #{p}") } ? 'gtk+-3.0 webkit2gtk-4.1' : nil
@@ -72,11 +94,5 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
     end
     spec.linker.libraries << 'stdc++'
     spec.linker.libraries << 'pthread'
-  when /darwin/
-    spec.linker.flags_after_libraries.concat(%w[-framework WebKit -framework Cocoa])
-    spec.linker.libraries << 'c++'
-  when /mingw|mswin|cygwin/
-    spec.linker.libraries.concat(%w[advapi32 ole32 shell32 shlwapi user32 version])
-    spec.cxx.flags << '-DWEBVIEW_EDGE'
   end
 end
