@@ -122,8 +122,8 @@ iv_hash(mrb_state *mrb, mrb_value self, mrb_sym sym) {
   return h;
 }
 
-#define BINDINGS_HASH(mrb, self) iv_hash(mrb, self, MRB_IVSYM(_bindings))
-#define DISPATCH_HASH(mrb, self) iv_hash(mrb, self, MRB_IVSYM(_dispatch_procs))
+#define BINDINGS_HASH(mrb, self) iv_hash(mrb, self, MRB_SYM(bindings))
+#define DISPATCH_HASH(mrb, self) iv_hash(mrb, self, MRB_SYM(dispatch_procs))
 
 /* ------------------------------------------------------------------------- */
 /* Bind callback machinery (lambda body)                                     */
@@ -299,8 +299,8 @@ mrb_webview_m_destroy(mrb_state *mrb, mrb_value self) {
     mrb_cpp_delete<webview::webview>(mrb, wv);
     DATA_PTR(self) = nullptr;
     DATA_TYPE(self) = nullptr;
-    mrb_iv_remove(mrb, self, MRB_IVSYM(_bindings));
-    mrb_iv_remove(mrb, self, MRB_IVSYM(_dispatch_procs));
+    mrb_iv_remove(mrb, self, MRB_SYM(bindings));
+    mrb_iv_remove(mrb, self, MRB_SYM(dispatch_procs));
   }
   return mrb_nil_value();
 }
@@ -509,10 +509,10 @@ mrb_webview_m_dispatch(mrb_state *mrb, mrb_value self) {
 
   mrb_value dh = DISPATCH_HASH(mrb, self);
 
-  mrb_value counter_v = mrb_iv_get(mrb, self, MRB_IVSYM(_dispatch_counter));
+  mrb_value counter_v = mrb_iv_get(mrb, self, MRB_SYM(dispatch_counter));
   mrb_int counter = mrb_integer_p(counter_v) ? mrb_integer(counter_v) : 0;
   counter++;
-  mrb_iv_set(mrb, self, MRB_IVSYM(_dispatch_counter), mrb_int_value(mrb, counter));
+  mrb_iv_set(mrb, self, MRB_SYM(dispatch_counter), mrb_int_value(mrb, counter));
 
   mrb_value key = mrb_int_value(mrb, counter);
   mrb_hash_set(mrb, dh, key, blk);
@@ -554,43 +554,6 @@ mrb_webview_s_version(mrb_state *mrb, mrb_value self) {
                mrb_str_new_cstr(mrb, info->build_metadata));
   return h;
 }
-
-/* ------------------------------------------------------------------------- */
-/* LSan suppressions baked into the binary                                   */
-/* ------------------------------------------------------------------------- */
-#if defined(__SANITIZE_ADDRESS__) || \
-    (defined(__has_feature) && __has_feature(address_sanitizer))
-extern "C" const char *__lsan_default_suppressions(void);
-extern "C" const char *__lsan_default_suppressions(void) {
-  return
-    "leak:libwebkit2gtk\n"
-    "leak:libwebkitgtk\n"
-    "leak:libjavascriptcoregtk\n"
-    "leak:WTF::AtomStringImpl\n"
-    "leak:WTF::StringImpl\n"
-    "leak:JSC::JSGlobalObject\n"
-    "leak:libfontconfig\n"
-    "leak:FcValueSave\n"
-    "leak:FcLangSetCopy\n"
-    "leak:FcPatternAdd\n"
-    "leak:FcFontRenderPrepare\n"
-    "leak:libEGL_mesa\n"
-    "leak:libpangocairo\n"
-    "leak:libpango\n"
-    "leak:libcairo\n"
-    "leak:libgdk_pixbuf\n"
-    "leak:libgio-2.0\n"
-    "leak:libgobject-2.0\n"
-    "leak:libglib-2.0\n"
-    "leak:g_type_class_get\n"
-    "leak:g_type_register_static\n"
-    "leak:g_object_new\n"
-    "leak:g_object_new_with_properties\n"
-    "leak:g_malloc\n"
-    "leak:g_malloc0\n"
-    "leak:pthread_once\n";
-}
-#endif
 
 /* ------------------------------------------------------------------------- */
 /* Init                                                                      */
