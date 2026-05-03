@@ -199,7 +199,7 @@ bind_invoke_body(mrb_state *mrb, void *p) {
   struct bind_step *s = (struct bind_step *)p;
   mrb_int argc = RARRAY_LEN(s->parsed);
   mrb_value *argv = RARRAY_PTR(s->parsed);
-  return mrb_funcall_with_block_id(mrb, s->proc, MRB_SYM(call),
+  return mrb_funcall_with_block(mrb, s->proc, MRB_SYM(call),
                                    argc, argv, mrb_nil_value());
 }
 
@@ -313,7 +313,7 @@ dispatch_ctx_new(mrb_state *mrb, mrb_webview_t *wv, mrb_int key,
 static mrb_value
 dispatch_invoke_body(mrb_state *mrb, void *p) {
   mrb_value proc = *(mrb_value *)p;
-  return mrb_funcall_with_block_id(mrb, proc, MRB_SYM(call),
+  return mrb_funcall_with_block(mrb, proc, MRB_SYM(call),
                                    0, NULL, mrb_nil_value());
 }
 
