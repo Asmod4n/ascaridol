@@ -148,7 +148,7 @@ bind_invoke_body(mrb_state *mrb, void *p) {
   auto *s = static_cast<bind_step *>(p);
   mrb_int argc = RARRAY_LEN(s->parsed);
   mrb_value *argv = RARRAY_PTR(s->parsed);
-  return mrb_funcall_with_block_id(mrb, s->proc, MRB_SYM(call),
+  return mrb_funcall_with_block(mrb, s->proc, MRB_SYM(call),
                                    argc, argv, mrb_nil_value());
 }
 
@@ -235,7 +235,7 @@ invoke_bound_proc(mrb_state *mrb, mrb_value self, mrb_sym name_sym,
 static mrb_value
 dispatch_invoke_body(mrb_state *mrb, void *p) {
   mrb_value proc = *static_cast<mrb_value *>(p);
-  return mrb_funcall_with_block_id(mrb, proc, MRB_SYM(call),
+  return mrb_funcall_with_block(mrb, proc, MRB_SYM(call),
                                    0, nullptr, mrb_nil_value());
 }
 
