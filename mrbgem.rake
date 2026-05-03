@@ -1,6 +1,6 @@
 MRuby::Gem::Specification.new('mruby-webview') do |spec|
   spec.license = 'MIT'
-  spec.author  = 'Hendrik'
+  spec.author  = 'Hendrik Beskow'
   spec.summary = 'Idiomatic Ruby bindings for the webview/webview library'
   spec.version = '0.1.0'
 

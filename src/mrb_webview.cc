@@ -7,7 +7,7 @@
  * owns the C++ instance via mruby-c-ext-helpers' Data_Make_Struct
  * wrapper (mrb_cpp_new / mrb_cpp_get / mrb_cpp_delete).
  *
- * Copyright (c) 2026 Hendrik. MIT License.
+ * Copyright (c) 2026 Hendrik Beskow. MIT License.
  */
 
 #include <mruby.h>
@@ -30,7 +30,6 @@
  * and the C bridge implementations compiled into this single TU. */
 #include <webview/webview.h>
 
-#include <cstdint>
 #include <functional>
 #include <string>
 
@@ -160,9 +159,9 @@ bind_dump_body(mrb_state *mrb, void *p) {
 
 static std::string
 make_error_json_str(mrb_state *mrb, mrb_value name, mrb_value message) {
-  mrb_value h = mrb_hash_new(mrb);
-  mrb_hash_set(mrb, h, mrb_str_new_lit(mrb, "name"),    name);
-  mrb_hash_set(mrb, h, mrb_str_new_lit(mrb, "message"), message);
+  mrb_value h = mrb_hash_new_capa(mrb, 2);
+  mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(name)),    name);
+  mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(message)), message);
   return to_std_string(mrb_json_dump(mrb, h));
 }
 

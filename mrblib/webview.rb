@@ -52,8 +52,10 @@ class Webview
     raise ArgumentError, "bind requires a block or callable" unless proc_obj
     proc_obj = proc_obj.to_proc unless proc_obj.is_a?(Proc)
     _bind_native(name, &proc_obj)
+    _install_error_shim(name)
     self
   end
+
 
   # Convenience accessors mirroring the C API.
   def title=(t); set_title(t.to_s); end
@@ -65,4 +67,29 @@ class Webview
     "#<Webview destroyed=#{destroyed?}>"
   end
   alias inspect to_s
+
+  private
+
+  # webview rejects promises with a plain {name:, message:} object when the
+  # Ruby block raises. Promote it to a real Error so JS callers get a readable
+  # stack and can use instanceof / .message normally.
+  def _install_error_shim(name)
+    js_name = name.to_s.inspect
+    init_script(<<~JS)
+      (function () {
+        var fn = window[#{js_name}];
+        if (typeof fn !== 'function') return;
+        window[#{js_name}] = function () {
+          return fn.apply(this, arguments).catch(function (e) {
+            if (e && typeof e === 'object' && typeof e.message === 'string') {
+              var err = new Error(e.message);
+              err.name = e.name || 'Error';
+              throw err;
+            }
+            throw e;
+          });
+        };
+      })();
+    JS
+  end
 end
