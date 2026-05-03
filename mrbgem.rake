@@ -1,5 +1,3 @@
-require 'fileutils'
-
 MRuby::Gem::Specification.new('mruby-webview') do |spec|
   spec.license = 'MIT'
   spec.author  = 'Hendrik'
@@ -18,13 +16,26 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
   spec.cc.defines  << 'MRB_UTF8_STRING'
   spec.cxx.defines << 'MRB_UTF8_STRING'
 
-  webview_version = ENV['MRUBY_WEBVIEW_VERSION'] || '0.12.0'
-  webview_repo    = ENV['MRUBY_WEBVIEW_REPO']    || 'https://github.com/webview/webview.git'
-  webview_dir     = ENV['MRUBY_WEBVIEW_DIR']     || File.join(spec.dir, 'vendor', 'webview')
+  # webview source ships as a git submodule under vendor/webview.
+  webview_dir = ENV['MRUBY_WEBVIEW_DIR'] || File.join(spec.dir, 'vendor', 'webview')
+  webview_inc = File.join(webview_dir, 'core', 'include')
 
-  unless File.directory?(File.join(webview_dir, 'core', 'include'))
-    FileUtils.mkdir_p(File.dirname(webview_dir))
-    sh "git clone --depth 1 --branch #{webview_version} #{webview_repo} #{webview_dir}"
+  unless File.directory?(webview_inc)
+    # Try to initialize the submodule automatically (works for sources that
+    # were checked out without --recurse-submodules).
+    if File.exist?(File.join(spec.dir, '.gitmodules'))
+      Dir.chdir(spec.dir) do
+        sh 'git submodule update --init --recursive vendor/webview'
+      end
+    end
+  end
+
+  unless File.directory?(webview_inc)
+    abort <<~MSG
+      [mruby-webview] webview source not found at #{webview_dir}.
+      Run `git submodule update --init --recursive` in the gem directory,
+      or set MRUBY_WEBVIEW_DIR to point at an existing webview checkout.
+    MSG
   end
 
   spec.cc.include_paths  << File.join(webview_dir, 'core', 'include')

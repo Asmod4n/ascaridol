@@ -12,20 +12,33 @@ Add this gem to your `build_config.rb`:
 ```ruby
 MRuby::Build.new do |conf|
   conf.toolchain :gcc
-  conf.gem github: 'asmod4n/mruby-webview', branch: 'main'
+  conf.gem github: 'asmod4n/mruby-webview', branch: 'main',
+           options: { recursive: true }   # pull the webview submodule too
 end
 ```
 
-`mrbgem.rake` will:
+The upstream `webview/webview` source is included as a git submodule at
+`vendor/webview` (pinned to a known-good tag). If you cloned without
+`--recurse-submodules`, `mrbgem.rake` will run
+`git submodule update --init --recursive vendor/webview` for you.
 
-1. Pull in [`mruby-fast-json`](https://github.com/asmod4n/mruby-fast-json) for
-   the JSON round-trip used by `bind` (and define `MRB_UTF8_STRING`, which it
+To check the gem out manually:
+
+```sh
+git clone --recurse-submodules https://github.com/asmod4n/mruby-webview.git
+# or, after a plain clone:
+git -C mruby-webview submodule update --init --recursive
+```
+
+`mrbgem.rake` then:
+
+1. Pulls in [`mruby-fast-json`](https://github.com/asmod4n/mruby-fast-json) for
+   the JSON round-trip used by `bind` (and defines `MRB_UTF8_STRING`, which it
    requires).
-2. Clone the upstream `webview/webview` source into `vendor/webview` (override
-   with `MRUBY_WEBVIEW_DIR`, `MRUBY_WEBVIEW_REPO`, `MRUBY_WEBVIEW_VERSION`).
-3. Compile `core/src/webview.cc` with your toolchain's C++ compiler.
-4. Detect platform libraries via `pkg-config` (Linux) or platform frameworks
-   (macOS/Windows) and add the right link flags.
+2. Compiles `vendor/webview/core/src/webview.cc` with your toolchain's C++
+   compiler. Override the location with `MRUBY_WEBVIEW_DIR` if needed.
+3. Detects platform libraries via `pkg-config` (Linux) or platform frameworks
+   (macOS/Windows) and adds the right link flags.
 
 ### System dependencies
 
