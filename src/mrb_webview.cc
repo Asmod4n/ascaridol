@@ -555,6 +555,28 @@ mrb_webview_m_dispatch(mrb_state *mrb, mrb_value self) {
   return self;
 }
 
+static mrb_value
+mrb_webview_m_bindings(mrb_state *mrb, mrb_value self) {
+  mrb_value bh = mrb_iv_get(mrb, self, MRB_SYM(bindings));
+  if (!mrb_hash_p(bh)) return mrb_ary_new(mrb);
+
+  mrb_value keys = mrb_hash_keys(mrb, bh);
+  mrb_int len = RARRAY_LEN(keys);
+  mrb_value result = mrb_ary_new_capa(mrb, len);
+
+  for (mrb_int i = 0; i < len; i++) {
+    mrb_value k = RARRAY_PTR(keys)[i];
+    if (mrb_symbol_p(k)) {
+      mrb_int name_len;
+      const char *name = mrb_sym_name_len(mrb, mrb_symbol(k), &name_len);
+      mrb_ary_push(mrb, result, mrb_str_new(mrb, name, name_len));
+    } else {
+      mrb_ary_push(mrb, result, mrb_funcall_id(mrb, k, MRB_SYM(to_s), 0));
+    }
+  }
+  return result;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Version                                                                   */
 /* ------------------------------------------------------------------------- */
@@ -622,6 +644,7 @@ mrb_mruby_webview_gem_init(mrb_state *mrb) {
   mrb_define_method_id(mrb, cls, MRB_SYM(return_result), mrb_webview_m_return,        MRB_ARGS_REQ(3));
 
   mrb_define_method_id(mrb, cls, MRB_SYM(dispatch),      mrb_webview_m_dispatch,      MRB_ARGS_BLOCK());
+  mrb_define_method_id(mrb, cls, MRB_SYM(bindings),      mrb_webview_m_bindings,      MRB_ARGS_NONE());
 
   mrb_define_class_method_id(mrb, cls, MRB_SYM(version), mrb_webview_s_version,       MRB_ARGS_NONE());
 }

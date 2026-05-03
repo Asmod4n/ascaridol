@@ -44,22 +44,15 @@ class Webview
   # serialized back to JSON for the JavaScript caller. Exceptions are reported
   # to JavaScript as a rejected promise carrying { name:, message: }.
   #
-  #   wv.bind("greet") { |name| "Hello, #{name}!" }
+  #   wv.bind(:greet) { |name| "Hello, #{name}!" }
   #
   # Calling `bind` again with the same name replaces the previous block.
   def bind(name, callable = nil, &block)
     proc_obj = block || callable
     raise ArgumentError, "bind requires a block or callable" unless proc_obj
     proc_obj = proc_obj.to_proc unless proc_obj.is_a?(Proc)
-    _bind_native(name.to_s, &proc_obj)
+    _bind_native(name, &proc_obj)
     self
-  end
-
-  # Returns the registered binding names (as Strings).
-  def bindings
-    h = instance_variable_get(:@_bindings)
-    return [] unless h
-    h.keys.map(&:to_s)
   end
 
   # Convenience accessors mirroring the C API.
