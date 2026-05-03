@@ -26,7 +26,7 @@ is compiled into the gem; no CMake needed.
 
 ```ruby
 Webview.open(title: 'Demo', size: [640, 480]) do |w|
-  w.bind('greet') { |name| "Hello, #{name}!" }
+  w.bind(:greet) { |name| "Hello, #{name}!" }
   w.html = <<~HTML
     <button onclick="greet('world').then(r => document.body.innerText = r)">Hi</button>
   HTML
@@ -45,9 +45,9 @@ w.html = '<h1>hi</h1>'
 w.init_script(js)              # runs on every navigation
 w.eval_script(js)              # eval in the current page
 
-w.bind('add') { |a, b| a + b } # block return value resolves the JS promise;
+w.bind(:add) { |a, b| a + b } # block return value resolves the JS promise;
                                # raising rejects it with { name:, message: }
-w.unbind('add')
+w.unbind(:add)
 
 w.dispatch { ... }             # run a block on the UI thread
 w.run                          # blocks until terminate / window closed
