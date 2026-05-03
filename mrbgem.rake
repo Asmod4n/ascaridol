@@ -59,13 +59,9 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
                cc_command  =~ /apple|darwin/i ||
                (host_target.empty? && !is_windows && `uname -s 2>/dev/null`.strip == 'Darwin')
 
-  # Extra flags we need to compile webview.cc itself (not just the .c bindings).
-  webview_extra_cflags = []
-
   if is_windows
     spec.linker.libraries.concat(%w[advapi32 ole32 shell32 shlwapi user32 version])
     spec.cxx.flags << '-DWEBVIEW_EDGE'
-    webview_extra_cflags << '-DWEBVIEW_EDGE'
   elsif is_darwin
     spec.linker.flags_after_libraries.concat(%w[-framework WebKit -framework Cocoa])
     spec.linker.libraries << 'c++'
@@ -88,7 +84,6 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
     cflags = `pkg-config --cflags #{pkg}`.strip.split(/\s+/).reject(&:empty?)
     libs   = `pkg-config --libs   #{pkg}`.strip.split(/\s+/).reject(&:empty?)
 
-    # Split pkg-config --cflags so each kind of flag goes to the right channel.
     cflags.each do |f|
       case f
       when /\A-I(.+)/  then
@@ -106,35 +101,8 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
     spec.linker.flags_after_libraries.concat(libs)
     spec.linker.libraries << 'stdc++'
     spec.linker.libraries << 'pthread'
-
-    # Mirror the same flags into our webview.cc rule below.
-    webview_extra_cflags.concat(cflags)
   end
 
-  # ------------------------------------------------------------------------
-  # Compile vendor/webview/core/src/webview.cc with the build's C++ compiler.
-  # We can't drop it into src/ because mruby would treat it as a gem source
-  # (and our naming/extension expectations differ), so we build it explicitly
-  # and add the resulting object to spec.objs.
-  # ------------------------------------------------------------------------
-  webview_src = File.join(webview_dir, 'core', 'src', 'webview.cc')
-  obj_ext     = build.exts.object
-  webview_obj = File.join(spec.build_dir, 'vendor', 'webview', "webview#{obj_ext}")
-
-  directory File.dirname(webview_obj)
-  file webview_obj => [webview_src, File.dirname(webview_obj)] do |t|
-    cxx = build.cxx
-    flag_parts = []
-    flag_parts.concat(Array(cxx.flags).flatten)
-    flag_parts.concat(Array(cxx.defines).map { |d| "-D#{d}" })
-    flag_parts.concat(Array(cxx.include_paths).map { |p| "-I#{p}" })
-    flag_parts.concat(Array(spec.cxx.flags).flatten)
-    flag_parts.concat(Array(spec.cxx.defines).map { |d| "-D#{d}" })
-    flag_parts.concat(Array(spec.cxx.include_paths).map { |p| "-I#{p}" })
-    flag_parts.concat(webview_extra_cflags)
-    flag_parts << '-std=c++14' unless flag_parts.any? { |f| f =~ /-std=c\+\+/ }
-    flag_parts << '-fPIC'      unless is_windows || flag_parts.include?('-fPIC')
-    sh "#{cxx.command} #{flag_parts.uniq.join(' ')} -c #{t.prerequisites.first} -o #{t.name}"
-  end
-  spec.objs << webview_obj
+  # webview's C++ core needs at least C++14.
+  spec.cxx.flags << '-std=c++14' unless spec.cxx.flags.flatten.any? { |f| f =~ /-std=c\+\+/ }
 end
