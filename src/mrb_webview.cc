@@ -587,7 +587,7 @@ mrb_webview_s_version(mrb_state *mrb, mrb_value self) {
 /* ------------------------------------------------------------------------- */
 /* Init                                                                      */
 /* ------------------------------------------------------------------------- */
-
+MRB_BEGIN_DECL
 void
 mrb_mruby_webview_gem_init(mrb_state *mrb) {
   struct RClass *cls = mrb_define_class(mrb, "Webview", mrb->object_class);
@@ -647,3 +647,4 @@ void
 mrb_mruby_webview_gem_final(mrb_state *mrb) {
   (void)mrb;
 }
+MRB_END_DECL

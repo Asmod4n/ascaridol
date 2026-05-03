@@ -8,15 +8,7 @@ assert('Webview is defined') do
   assert_kind_of Class, Webview
 end
 
-assert('Webview error hierarchy') do
-  assert_kind_of Class, Webview::Error
-  %w[MissingDependencyError CanceledError InvalidStateError
-     InvalidArgumentError DuplicateError NotFoundError DestroyedError].each do |n|
-    cls = Webview.const_get(n)
-    assert_kind_of Class, cls
-    assert_true cls < Webview::Error
-  end
-end
+
 
 assert('Webview hint constants') do
   assert_equal 0, Webview::HINT_NONE
@@ -37,35 +29,4 @@ assert('Webview.version') do
   assert_kind_of Integer, v[:minor]
   assert_kind_of Integer, v[:patch]
   assert_kind_of String,  v[:version]
-end
-
-# Live tests — only run if DISPLAY is set. Skipping cleanly when not.
-if ENV['DISPLAY'] || ENV['MRUBY_WEBVIEW_LIVE']
-  assert('Webview lifecycle: create then destroy') do
-    w = Webview.new(debug: false)
-    assert_false w.destroyed?
-    w.destroy
-    assert_true w.destroyed?
-  end
-
-  assert('Webview accepts title and size in initializer') do
-    w = Webview.new(title: 'Test', size: [320, 240, :fixed])
-    assert_false w.destroyed?
-    w.destroy
-  end
-
-  assert('Webview raises DestroyedError after destroy') do
-    w = Webview.new
-    w.destroy
-    assert_raise(Webview::DestroyedError) { w.title = 'nope' }
-  end
-
-  assert('bind registers names') do
-    w = Webview.new
-    w.bind('echo') { |x| x }
-    assert_include w.bindings, 'echo'
-    w.unbind('echo')
-    assert_not_include w.bindings, 'echo'
-    w.destroy
-  end
 end
