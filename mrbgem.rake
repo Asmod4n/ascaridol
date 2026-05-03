@@ -4,7 +4,7 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
   spec.summary = 'Idiomatic Ruby bindings for the webview/webview library'
   spec.version = '0.1.0'
 
-  spec.add_dependency 'mruby-fast-json', github: 'asmod4n/mruby-fast-json'
+  spec.add_dependency 'mruby-fast-json'
   spec.add_dependency 'mruby-string-ext', core: 'mruby-string-ext'
   spec.add_dependency 'mruby-hash-ext',   core: 'mruby-hash-ext'
   spec.add_dependency 'mruby-symbol-ext', core: 'mruby-symbol-ext'
