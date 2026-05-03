@@ -1,5 +1,11 @@
 *.gem
 *.rbc
+*.o
+*.a
+*.so
+*.dylib
+/vendor/
+/build/
 /.config
 /coverage/
 /InstalledFiles
