@@ -1,14 +1,14 @@
-// Single-translation-unit build of webview/webview's C++ implementation.
-//
-// We don't add vendor/webview/core/src/webview.cc to spec.objs directly,
-// because the exact moment at which mruby's gem setup pipeline reads
-// spec.objs (and how it dispatches custom file rules) varies between
-// mruby versions and can drop externally-added object files. By placing
-// this thin wrapper inside src/, mruby's auto-glob picks it up like any
-// other gem source, compiles it with the configured C++ toolchain, and
-// archives the result into libmruby.a alongside the bindings in
-// mrb_webview.c.
-//
-// The relative include resolves against this file's directory, so it
-// keeps working regardless of -I order or the build directory layout.
-#include "../vendor/webview/core/src/webview.cc"
+/*
+ * Single translation unit for webview's C++ implementation.
+ *
+ * webview/webview.h uses a WEBVIEW_HEADER guard: when defined, the header
+ * exposes only declarations; when undefined (the default), it pulls the full
+ * implementation into the current translation unit. We rely on that here
+ * exactly once, while every other compilation unit in this gem (notably
+ * src/mrb_webview.cc) defines WEBVIEW_HEADER before including the header.
+ *
+ * mruby's gem build auto-globs src/ so this file is compiled with the build's
+ * configured C++ toolchain (and the spec.cxx flags from mrbgem.rake), and the
+ * resulting object lands in libmruby.a alongside the bindings.
+ */
+#include <webview/webview.h>

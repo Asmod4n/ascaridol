@@ -17,6 +17,10 @@
 #include <mruby/value.h>
 #include <mruby/numeric.h>
 
+/* Use webview's header in declarations-only mode here. The implementation
+ * is compiled exactly once via src/webview_impl.cc, which includes the same
+ * header without WEBVIEW_HEADER defined. */
+#define WEBVIEW_HEADER
 #include <webview/webview.h>
 
 #include <stdlib.h>
