@@ -13,7 +13,6 @@
 #include <mruby/class.h>
 #include <mruby/proc.h>
 #include <mruby/error.h>
-#include <mruby/throw.h>
 #include <mruby/value.h>
 #include <mruby/numeric.h>
 
@@ -146,6 +145,36 @@ make_error_json(mrb_state *mrb, const char *name, mrb_value message) {
   return mrb_webview_json_dump(mrb, err);
 }
 
+/* Per-step state passed through mrb_protect_error. Output fields are
+ * filled in by the body functions and consumed by binding_callback. */
+struct bind_step {
+  const char *req;     /* in:  raw JSON args                        */
+  mrb_value proc;      /* in:  Ruby proc to invoke                  */
+  mrb_value parsed;    /* in/out: parsed args for the invoke step   */
+  mrb_value result;    /* in:  result for the dump step             */
+};
+
+static mrb_value
+bind_parse_body(mrb_state *mrb, void *p) {
+  struct bind_step *s = (struct bind_step *)p;
+  return mrb_webview_json_parse(mrb, s->req);
+}
+
+static mrb_value
+bind_invoke_body(mrb_state *mrb, void *p) {
+  struct bind_step *s = (struct bind_step *)p;
+  mrb_int argc = RARRAY_LEN(s->parsed);
+  mrb_value *argv = RARRAY_PTR(s->parsed);
+  return mrb_funcall_with_block(mrb, s->proc, mrb_intern_lit(mrb, "call"),
+                                argc, argv, mrb_nil_value());
+}
+
+static mrb_value
+bind_dump_body(mrb_state *mrb, void *p) {
+  struct bind_step *s = (struct bind_step *)p;
+  return mrb_webview_json_dump(mrb, s->result);
+}
+
 static void
 binding_callback(const char *id, const char *req, void *arg) {
   binding_ctx *ctx = (binding_ctx *)arg;
@@ -165,65 +194,46 @@ binding_callback(const char *id, const char *req, void *arg) {
     return;
   }
 
-  struct mrb_jmpbuf *prev_jmp = mrb->jmp;
-  struct mrb_jmpbuf cjmp;
-  mrb_value parsed;
+  struct bind_step step = { req, proc, mrb_nil_value(), mrb_nil_value() };
+  mrb_bool err = FALSE;
 
-  /* Step 1: parse JSON arguments */
-  MRB_TRY(&cjmp) {
-    mrb->jmp = &cjmp;
-    parsed = mrb_webview_json_parse(mrb, req);
-    mrb->jmp = prev_jmp;
-  } MRB_CATCH(&cjmp) {
-    mrb->jmp = prev_jmp;
-    mrb_value exc = mrb_obj_value(mrb->exc);
-    mrb->exc = NULL;
-    mrb_value msg = mrb_funcall(mrb, exc, "message", 0);
+  /* Step 1: parse JSON arguments. */
+  mrb_value parsed = mrb_protect_error(mrb, bind_parse_body, &step, &err);
+  if (err) {
+    mrb_value msg = mrb_funcall(mrb, parsed, "message", 0);
     mrb_value json = make_error_json(mrb, "ParseError", msg);
     webview_return(handle, id, 1, mrb_string_value_cstr(mrb, &json));
     mrb_gc_arena_restore(mrb, ai);
     return;
-  } MRB_END_EXC(&cjmp);
-
+  }
   if (!mrb_array_p(parsed)) {
     mrb_value tmp = mrb_ary_new_capa(mrb, 1);
     mrb_ary_push(mrb, tmp, parsed);
     parsed = tmp;
   }
+  step.parsed = parsed;
 
-  /* Step 2: invoke the bound proc */
-  mrb_value result = mrb_nil_value();
-  MRB_TRY(&cjmp) {
-    mrb->jmp = &cjmp;
-    mrb_int argc = RARRAY_LEN(parsed);
-    mrb_value *argv = RARRAY_PTR(parsed);
-    result = mrb_funcall_with_block(mrb, proc, mrb_intern_lit(mrb, "call"),
-                                    argc, argv, mrb_nil_value());
-    mrb->jmp = prev_jmp;
-  } MRB_CATCH(&cjmp) {
-    mrb->jmp = prev_jmp;
-    mrb_value exc = mrb_obj_value(mrb->exc);
-    mrb->exc = NULL;
-    mrb_value msg  = mrb_funcall(mrb, exc, "message", 0);
-    mrb_value klass_name = mrb_funcall(mrb, mrb_funcall(mrb, exc, "class", 0), "name", 0);
-    const char *cname = mrb_string_p(klass_name) ? mrb_string_value_cstr(mrb, &klass_name) : "Error";
+  /* Step 2: invoke the bound proc. */
+  err = FALSE;
+  mrb_value result = mrb_protect_error(mrb, bind_invoke_body, &step, &err);
+  if (err) {
+    mrb_value msg  = mrb_funcall(mrb, result, "message", 0);
+    mrb_value cls  = mrb_funcall(mrb, result, "class", 0);
+    mrb_value name = mrb_funcall(mrb, cls, "name", 0);
+    const char *cname = mrb_string_p(name) ? mrb_string_value_cstr(mrb, &name) : "Error";
     mrb_value json = make_error_json(mrb, cname, msg);
     webview_return(handle, id, 1, mrb_string_value_cstr(mrb, &json));
     mrb_gc_arena_restore(mrb, ai);
     return;
-  } MRB_END_EXC(&cjmp);
+  }
+  step.result = result;
 
-  /* Step 3: serialize and return */
-  mrb_value json_result;
-  MRB_TRY(&cjmp) {
-    mrb->jmp = &cjmp;
-    json_result = mrb_webview_json_dump(mrb, result);
-    mrb->jmp = prev_jmp;
-  } MRB_CATCH(&cjmp) {
-    mrb->jmp = prev_jmp;
-    mrb->exc = NULL;
+  /* Step 3: serialize the result. */
+  err = FALSE;
+  mrb_value json_result = mrb_protect_error(mrb, bind_dump_body, &step, &err);
+  if (err) {
     json_result = mrb_str_new_lit(mrb, "null");
-  } MRB_END_EXC(&cjmp);
+  }
 
   webview_return(handle, id, 0, mrb_string_value_cstr(mrb, &json_result));
   mrb_gc_arena_restore(mrb, ai);
@@ -237,6 +247,13 @@ typedef struct dispatch_ctx {
   mrb_webview_t *wv;
   mrb_int key;
 } dispatch_ctx;
+
+static mrb_value
+dispatch_invoke_body(mrb_state *mrb, void *p) {
+  mrb_value proc = *(mrb_value *)p;
+  return mrb_funcall_with_block(mrb, proc, mrb_intern_lit(mrb, "call"),
+                                0, NULL, mrb_nil_value());
+}
 
 static void
 dispatch_callback(webview_t w, void *arg) {
@@ -253,17 +270,11 @@ dispatch_callback(webview_t w, void *arg) {
   mrb_value proc = mrb_hash_get(mrb, dh, key);
 
   if (!mrb_nil_p(proc)) {
-    struct mrb_jmpbuf *prev_jmp = mrb->jmp;
-    struct mrb_jmpbuf cjmp;
-    MRB_TRY(&cjmp) {
-      mrb->jmp = &cjmp;
-      mrb_funcall_with_block(mrb, proc, mrb_intern_lit(mrb, "call"),
-                             0, NULL, mrb_nil_value());
-      mrb->jmp = prev_jmp;
-    } MRB_CATCH(&cjmp) {
-      mrb->jmp = prev_jmp;
-      mrb->exc = NULL; /* errors in dispatch blocks are silently swallowed */
-    } MRB_END_EXC(&cjmp);
+    /* Errors in dispatch blocks are silently swallowed: there's no caller
+     * to propagate them to. mrb_protect_error captures the exception (and
+     * clears mrb->exc) so the rest of the run loop is unaffected. */
+    mrb_bool err = FALSE;
+    mrb_protect_error(mrb, dispatch_invoke_body, &proc, &err);
   }
 
   mrb_hash_delete_key(mrb, dh, key);
