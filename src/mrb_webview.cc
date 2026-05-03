@@ -172,10 +172,10 @@ binding_ctx_new(mrb_state *mrb, mrb_webview_t *wv, mrb_sym name_sym,
 }
 
 static mrb_value
-make_error_json(mrb_state *mrb, const char *name, mrb_value message) {
+make_error_json(mrb_state *mrb, mrb_value name, mrb_value message) {
   mrb_value err = mrb_hash_new(mrb);
-  mrb_hash_set(mrb, err, mrb_str_new_cstr(mrb, "name"),    mrb_str_new_cstr(mrb, name));
-  mrb_hash_set(mrb, err, mrb_str_new_cstr(mrb, "message"), message);
+  mrb_hash_set(mrb, err, mrb_str_new_lit(mrb, "name"),    name);
+  mrb_hash_set(mrb, err, mrb_str_new_lit(mrb, "message"), message);
   return mrb_webview_json_dump(mrb, err);
 }
 
@@ -235,7 +235,7 @@ binding_callback(const char *id, const char *req, void *arg) {
   mrb_value parsed = mrb_protect_error(mrb, bind_parse_body, &step, &err);
   if (err) {
     mrb_value msg = mrb_funcall_id(mrb, parsed, MRB_SYM(message), 0);
-    mrb_value json = make_error_json(mrb, "ParseError", msg);
+    mrb_value json = make_error_json(mrb, mrb_str_new_lit(mrb, "ParseError"), msg);
     webview_return(handle, id, 1, mrb_string_value_cstr(mrb, &json));
     mrb_gc_arena_restore(mrb, ai);
     return;
@@ -254,8 +254,8 @@ binding_callback(const char *id, const char *req, void *arg) {
     mrb_value msg  = mrb_funcall_id(mrb, result, MRB_SYM(message), 0);
     mrb_value cls  = mrb_funcall_id(mrb, result, MRB_SYM(class), 0);
     mrb_value name = mrb_funcall_id(mrb, cls, MRB_SYM(name), 0);
-    const char *cname = mrb_string_p(name) ? mrb_string_value_cstr(mrb, &name) : "Error";
-    mrb_value json = make_error_json(mrb, cname, msg);
+    if (!mrb_string_p(name)) name = mrb_str_new_lit(mrb, "Error");
+    mrb_value json = make_error_json(mrb, name, msg);
     webview_return(handle, id, 1, mrb_string_value_cstr(mrb, &json));
     mrb_gc_arena_restore(mrb, ai);
     return;
