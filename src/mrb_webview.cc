@@ -99,14 +99,14 @@ mrb_webview_check(mrb_state *mrb, webview_error_t err) {
 
 static mrb_value
 mrb_webview_json_parse(mrb_state *mrb, const char *src) {
-  struct RClass *json = mrb_module_get(mrb, "JSON");
-  return mrb_funcall(mrb, mrb_obj_value(json), "parse", 1, mrb_str_new_cstr(mrb, src));
+  struct RClass *json = mrb_module_get_id(mrb, MRB_SYM(JSON));
+  return mrb_funcall_id(mrb, mrb_obj_value(json), MRB_SYM(parse), 1, mrb_str_new_cstr(mrb, src));
 }
 
 static mrb_value
 mrb_webview_json_dump(mrb_state *mrb, mrb_value v) {
-  struct RClass *json = mrb_module_get(mrb, "JSON");
-  return mrb_funcall(mrb, mrb_obj_value(json), "dump", 1, v);
+  struct RClass *json = mrb_module_get_id(mrb, MRB_SYM(JSON));
+  return mrb_funcall_id(mrb, mrb_obj_value(json), MRB_SYM(dump), 1, v);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -114,8 +114,7 @@ mrb_webview_json_dump(mrb_state *mrb, mrb_value v) {
 /* ------------------------------------------------------------------------- */
 
 static mrb_value
-iv_hash(mrb_state *mrb, mrb_value self, const char *name) {
-  mrb_sym sym = mrb_intern_cstr(mrb, name);
+iv_hash(mrb_state *mrb, mrb_value self, mrb_sym sym) {
   mrb_value h = mrb_iv_get(mrb, self, sym);
   if (!mrb_hash_p(h)) {
     h = mrb_hash_new(mrb);
@@ -124,9 +123,9 @@ iv_hash(mrb_state *mrb, mrb_value self, const char *name) {
   return h;
 }
 
-#define BINDINGS_HASH(mrb, self) iv_hash(mrb, self, "@_bindings")
-#define CTXS_HASH(mrb, self)     iv_hash(mrb, self, "@_binding_ctxs")
-#define DISPATCH_HASH(mrb, self) iv_hash(mrb, self, "@_dispatch_procs")
+#define BINDINGS_HASH(mrb, self) iv_hash(mrb, self, MRB_IVSYM(_bindings))
+#define CTXS_HASH(mrb, self)     iv_hash(mrb, self, MRB_IVSYM(_binding_ctxs))
+#define DISPATCH_HASH(mrb, self) iv_hash(mrb, self, MRB_IVSYM(_dispatch_procs))
 
 /* ------------------------------------------------------------------------- */
 /* Bind callback machinery                                                   */
@@ -200,8 +199,8 @@ bind_invoke_body(mrb_state *mrb, void *p) {
   struct bind_step *s = (struct bind_step *)p;
   mrb_int argc = RARRAY_LEN(s->parsed);
   mrb_value *argv = RARRAY_PTR(s->parsed);
-  return mrb_funcall_with_block(mrb, s->proc, mrb_intern_lit(mrb, "call"),
-                                argc, argv, mrb_nil_value());
+  return mrb_funcall_with_block_id(mrb, s->proc, MRB_SYM(call),
+                                   argc, argv, mrb_nil_value());
 }
 
 static mrb_value
@@ -235,7 +234,7 @@ binding_callback(const char *id, const char *req, void *arg) {
   /* Step 1: parse JSON arguments. */
   mrb_value parsed = mrb_protect_error(mrb, bind_parse_body, &step, &err);
   if (err) {
-    mrb_value msg = mrb_funcall(mrb, parsed, "message", 0);
+    mrb_value msg = mrb_funcall_id(mrb, parsed, MRB_SYM(message), 0);
     mrb_value json = make_error_json(mrb, "ParseError", msg);
     webview_return(handle, id, 1, mrb_string_value_cstr(mrb, &json));
     mrb_gc_arena_restore(mrb, ai);
@@ -252,9 +251,9 @@ binding_callback(const char *id, const char *req, void *arg) {
   err = FALSE;
   mrb_value result = mrb_protect_error(mrb, bind_invoke_body, &step, &err);
   if (err) {
-    mrb_value msg  = mrb_funcall(mrb, result, "message", 0);
-    mrb_value cls  = mrb_funcall(mrb, result, "class", 0);
-    mrb_value name = mrb_funcall(mrb, cls, "name", 0);
+    mrb_value msg  = mrb_funcall_id(mrb, result, MRB_SYM(message), 0);
+    mrb_value cls  = mrb_funcall_id(mrb, result, MRB_SYM(class), 0);
+    mrb_value name = mrb_funcall_id(mrb, cls, MRB_SYM(name), 0);
     const char *cname = mrb_string_p(name) ? mrb_string_value_cstr(mrb, &name) : "Error";
     mrb_value json = make_error_json(mrb, cname, msg);
     webview_return(handle, id, 1, mrb_string_value_cstr(mrb, &json));
@@ -314,8 +313,8 @@ dispatch_ctx_new(mrb_state *mrb, mrb_webview_t *wv, mrb_int key,
 static mrb_value
 dispatch_invoke_body(mrb_state *mrb, void *p) {
   mrb_value proc = *(mrb_value *)p;
-  return mrb_funcall_with_block(mrb, proc, mrb_intern_lit(mrb, "call"),
-                                0, NULL, mrb_nil_value());
+  return mrb_funcall_with_block_id(mrb, proc, MRB_SYM(call),
+                                   0, NULL, mrb_nil_value());
 }
 
 static void
@@ -431,9 +430,9 @@ mrb_webview_m_destroy(mrb_state *mrb, mrb_value self) {
      * sweep and runs the dfree functions to release the structs. */
     webview_destroy(wv->handle);
     wv->handle = NULL;
-    mrb_iv_remove(mrb, self, mrb_intern_lit(mrb, "@_bindings"));
-    mrb_iv_remove(mrb, self, mrb_intern_lit(mrb, "@_binding_ctxs"));
-    mrb_iv_remove(mrb, self, mrb_intern_lit(mrb, "@_dispatch_procs"));
+    mrb_iv_remove(mrb, self, MRB_IVSYM(_bindings));
+    mrb_iv_remove(mrb, self, MRB_IVSYM(_binding_ctxs));
+    mrb_iv_remove(mrb, self, MRB_IVSYM(_dispatch_procs));
   }
   return mrb_nil_value();
 }
@@ -625,10 +624,10 @@ mrb_webview_m_dispatch(mrb_state *mrb, mrb_value self) {
   mrb_value dh = DISPATCH_HASH(mrb, self);
 
   /* monotonic key */
-  mrb_value counter_v = mrb_iv_get(mrb, self, mrb_intern_lit(mrb, "@_dispatch_counter"));
+  mrb_value counter_v = mrb_iv_get(mrb, self, MRB_IVSYM(_dispatch_counter));
   mrb_int counter = mrb_integer_p(counter_v) ? mrb_integer(counter_v) : 0;
   counter++;
-  mrb_iv_set(mrb, self, mrb_intern_lit(mrb, "@_dispatch_counter"), mrb_int_value(mrb, counter));
+  mrb_iv_set(mrb, self, MRB_IVSYM(_dispatch_counter), mrb_int_value(mrb, counter));
   mrb_value key = mrb_int_value(mrb, counter);
 
   /* Allocate dispatch_ctx wrapped in a Data wrapper so the GC owns its
@@ -660,17 +659,17 @@ mrb_webview_s_version(mrb_state *mrb, mrb_value self) {
   (void)self;
   const webview_version_info_t *info = webview_version();
   mrb_value h = mrb_hash_new(mrb);
-  mrb_hash_set(mrb, h, mrb_symbol_value(mrb_intern_lit(mrb, "major")),
+  mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(major)),
                mrb_int_value(mrb, info->version.major));
-  mrb_hash_set(mrb, h, mrb_symbol_value(mrb_intern_lit(mrb, "minor")),
+  mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(minor)),
                mrb_int_value(mrb, info->version.minor));
-  mrb_hash_set(mrb, h, mrb_symbol_value(mrb_intern_lit(mrb, "patch")),
+  mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(patch)),
                mrb_int_value(mrb, info->version.patch));
-  mrb_hash_set(mrb, h, mrb_symbol_value(mrb_intern_lit(mrb, "version")),
+  mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(version)),
                mrb_str_new_cstr(mrb, info->version_number));
-  mrb_hash_set(mrb, h, mrb_symbol_value(mrb_intern_lit(mrb, "pre_release")),
+  mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(pre_release)),
                mrb_str_new_cstr(mrb, info->pre_release));
-  mrb_hash_set(mrb, h, mrb_symbol_value(mrb_intern_lit(mrb, "build_metadata")),
+  mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(build_metadata)),
                mrb_str_new_cstr(mrb, info->build_metadata));
   return h;
 }
@@ -768,45 +767,45 @@ mrb_mruby_webview_gem_init(mrb_state *mrb) {
   mrb_define_class_under(mrb, cls, "NotFoundError",          err);
   mrb_define_class_under(mrb, cls, "DestroyedError",         err);
 
-  mrb_define_method(mrb, cls, "initialize",   mrb_webview_m_initialize,   MRB_ARGS_OPT(2));
-  mrb_define_method(mrb, cls, "destroy",      mrb_webview_m_destroy,      MRB_ARGS_NONE());
-  mrb_define_method(mrb, cls, "destroyed?",   mrb_webview_m_destroyed_p,  MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, cls, MRB_SYM(initialize),    mrb_webview_m_initialize,    MRB_ARGS_OPT(2));
+  mrb_define_method_id(mrb, cls, MRB_SYM(destroy),       mrb_webview_m_destroy,       MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, cls, MRB_SYM_Q(destroyed),   mrb_webview_m_destroyed_p,   MRB_ARGS_NONE());
 
-  mrb_define_method(mrb, cls, "run",          mrb_webview_m_run,          MRB_ARGS_NONE());
-  mrb_define_method(mrb, cls, "terminate",    mrb_webview_m_terminate,    MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, cls, MRB_SYM(run),           mrb_webview_m_run,           MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, cls, MRB_SYM(terminate),     mrb_webview_m_terminate,     MRB_ARGS_NONE());
 
-  mrb_define_method(mrb, cls, "title=",       mrb_webview_m_set_title,    MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, cls, "set_title",    mrb_webview_m_set_title,    MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, cls, "set_size",     mrb_webview_m_set_size,     MRB_ARGS_ARG(2,1));
-  mrb_define_method(mrb, cls, "navigate",     mrb_webview_m_navigate,     MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, cls, "url=",         mrb_webview_m_navigate,     MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, cls, "set_html",     mrb_webview_m_set_html,     MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, cls, "html=",        mrb_webview_m_set_html,     MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, cls, "init_script",  mrb_webview_m_init_js,      MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, cls, "eval_script",  mrb_webview_m_eval,         MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM_E(title),       mrb_webview_m_set_title,     MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM(set_title),     mrb_webview_m_set_title,     MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM(set_size),      mrb_webview_m_set_size,      MRB_ARGS_ARG(2,1));
+  mrb_define_method_id(mrb, cls, MRB_SYM(navigate),      mrb_webview_m_navigate,      MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM_E(url),         mrb_webview_m_navigate,      MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM(set_html),      mrb_webview_m_set_html,      MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM_E(html),        mrb_webview_m_set_html,      MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM(init_script),   mrb_webview_m_init_js,       MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM(eval_script),   mrb_webview_m_eval,          MRB_ARGS_REQ(1));
 
-  mrb_define_method(mrb, cls, "window_handle",mrb_webview_m_window_handle,MRB_ARGS_NONE());
-  mrb_define_method(mrb, cls, "native_handle",mrb_webview_m_native_handle,MRB_ARGS_OPT(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM(window_handle), mrb_webview_m_window_handle, MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, cls, MRB_SYM(native_handle), mrb_webview_m_native_handle, MRB_ARGS_OPT(1));
 
-  mrb_define_method(mrb, cls, "_bind_native", mrb_webview_m_bind,         MRB_ARGS_REQ(1) | MRB_ARGS_BLOCK());
-  mrb_define_method(mrb, cls, "unbind",       mrb_webview_m_unbind,       MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, cls, "return_result",mrb_webview_m_return,       MRB_ARGS_REQ(3));
+  mrb_define_method_id(mrb, cls, MRB_SYM(_bind_native),  mrb_webview_m_bind,          MRB_ARGS_REQ(1) | MRB_ARGS_BLOCK());
+  mrb_define_method_id(mrb, cls, MRB_SYM(unbind),        mrb_webview_m_unbind,        MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM(return_result), mrb_webview_m_return,        MRB_ARGS_REQ(3));
 
-  mrb_define_method(mrb, cls, "dispatch",     mrb_webview_m_dispatch,     MRB_ARGS_BLOCK());
+  mrb_define_method_id(mrb, cls, MRB_SYM(dispatch),      mrb_webview_m_dispatch,      MRB_ARGS_BLOCK());
 
-  mrb_define_class_method(mrb, cls, "version", mrb_webview_s_version,     MRB_ARGS_NONE());
+  mrb_define_class_method_id(mrb, cls, MRB_SYM(version), mrb_webview_s_version,       MRB_ARGS_NONE());
 
-  mrb_define_const(mrb, cls, "HINT_NONE",  mrb_int_value(mrb, WEBVIEW_HINT_NONE));
-  mrb_define_const(mrb, cls, "HINT_MIN",   mrb_int_value(mrb, WEBVIEW_HINT_MIN));
-  mrb_define_const(mrb, cls, "HINT_MAX",   mrb_int_value(mrb, WEBVIEW_HINT_MAX));
-  mrb_define_const(mrb, cls, "HINT_FIXED", mrb_int_value(mrb, WEBVIEW_HINT_FIXED));
+  mrb_define_const_id(mrb, cls, MRB_SYM(HINT_NONE),  mrb_int_value(mrb, WEBVIEW_HINT_NONE));
+  mrb_define_const_id(mrb, cls, MRB_SYM(HINT_MIN),   mrb_int_value(mrb, WEBVIEW_HINT_MIN));
+  mrb_define_const_id(mrb, cls, MRB_SYM(HINT_MAX),   mrb_int_value(mrb, WEBVIEW_HINT_MAX));
+  mrb_define_const_id(mrb, cls, MRB_SYM(HINT_FIXED), mrb_int_value(mrb, WEBVIEW_HINT_FIXED));
 
-  mrb_define_const(mrb, cls, "NATIVE_HANDLE_UI_WINDOW",
-                   mrb_int_value(mrb, WEBVIEW_NATIVE_HANDLE_KIND_UI_WINDOW));
-  mrb_define_const(mrb, cls, "NATIVE_HANDLE_UI_WIDGET",
-                   mrb_int_value(mrb, WEBVIEW_NATIVE_HANDLE_KIND_UI_WIDGET));
-  mrb_define_const(mrb, cls, "NATIVE_HANDLE_BROWSER_CONTROLLER",
-                   mrb_int_value(mrb, WEBVIEW_NATIVE_HANDLE_KIND_BROWSER_CONTROLLER));
+  mrb_define_const_id(mrb, cls, MRB_SYM(NATIVE_HANDLE_UI_WINDOW),
+                      mrb_int_value(mrb, WEBVIEW_NATIVE_HANDLE_KIND_UI_WINDOW));
+  mrb_define_const_id(mrb, cls, MRB_SYM(NATIVE_HANDLE_UI_WIDGET),
+                      mrb_int_value(mrb, WEBVIEW_NATIVE_HANDLE_KIND_UI_WIDGET));
+  mrb_define_const_id(mrb, cls, MRB_SYM(NATIVE_HANDLE_BROWSER_CONTROLLER),
+                      mrb_int_value(mrb, WEBVIEW_NATIVE_HANDLE_KIND_BROWSER_CONTROLLER));
 }
 
 void
