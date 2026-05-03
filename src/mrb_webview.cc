@@ -49,8 +49,9 @@ static mrb_webview_t *
 mrb_webview_get(mrb_state *mrb, mrb_value self) {
   mrb_webview_t *wv = (mrb_webview_t *)mrb_data_get_ptr(mrb, self, &mrb_webview_data_type);
   if (!wv || !wv->handle) {
-    mrb_raise(mrb, mrb_class_get_under(mrb, mrb_class_get(mrb, "Webview"), "DestroyedError"),
-              "Webview instance has been destroyed");
+    mrb_raise(mrb,
+      mrb_class_get_under_id(mrb, mrb_class_get_id(mrb, MRB_SYM(Webview)), MRB_SYM(DestroyedError)),
+      "Webview instance has been destroyed");
   }
   return wv;
 }
@@ -61,19 +62,19 @@ mrb_webview_get(mrb_state *mrb, mrb_value self) {
 
 static struct RClass *
 mrb_webview_error_class(mrb_state *mrb, webview_error_t err) {
-  struct RClass *base = mrb_class_get(mrb, "Webview");
-  const char *name;
+  struct RClass *base = mrb_class_get_id(mrb, MRB_SYM(Webview));
+  mrb_sym name;
   switch (err) {
-    case WEBVIEW_ERROR_MISSING_DEPENDENCY: name = "MissingDependencyError"; break;
-    case WEBVIEW_ERROR_CANCELED:           name = "CanceledError";          break;
-    case WEBVIEW_ERROR_INVALID_STATE:      name = "InvalidStateError";      break;
-    case WEBVIEW_ERROR_INVALID_ARGUMENT:   name = "InvalidArgumentError";   break;
-    case WEBVIEW_ERROR_DUPLICATE:          name = "DuplicateError";         break;
-    case WEBVIEW_ERROR_NOT_FOUND:          name = "NotFoundError";          break;
+    case WEBVIEW_ERROR_MISSING_DEPENDENCY: name = MRB_SYM(MissingDependencyError); break;
+    case WEBVIEW_ERROR_CANCELED:           name = MRB_SYM(CanceledError);          break;
+    case WEBVIEW_ERROR_INVALID_STATE:      name = MRB_SYM(InvalidStateError);      break;
+    case WEBVIEW_ERROR_INVALID_ARGUMENT:   name = MRB_SYM(InvalidArgumentError);   break;
+    case WEBVIEW_ERROR_DUPLICATE:          name = MRB_SYM(DuplicateError);         break;
+    case WEBVIEW_ERROR_NOT_FOUND:          name = MRB_SYM(NotFoundError);          break;
     case WEBVIEW_ERROR_UNSPECIFIED:
-    default:                               name = "Error";                  break;
+    default:                               name = MRB_SYM(Error);                  break;
   }
-  return mrb_class_get_under(mrb, base, name);
+  return mrb_class_get_under_id(mrb, base, name);
 }
 
 static void
@@ -146,12 +147,25 @@ static const struct mrb_data_type binding_ctx_type = {
   "Webview::BindingCtx", binding_ctx_dfree
 };
 
+/* Dedicated internal classes for the two Data wrappers below. They live
+ * under Webview, have their instance type tag set to MRB_TT_CDATA, and have
+ * their public `new` undefined (only the C extension creates instances).
+ * Using a real class instead of mrb->object_class is the convention for
+ * Data_Make_Struct: the resulting RData carries the right class, not the
+ * generic Object, which keeps introspection sane and avoids any subtle
+ * cross-talk with mruby's own Object handling. */
+static struct RClass *
+binding_ctx_class(mrb_state *mrb) {
+  return mrb_class_get_under_id(mrb,
+    mrb_class_get_id(mrb, MRB_SYM(Webview)), MRB_SYM(BindingCtx));
+}
+
 static binding_ctx *
 binding_ctx_new(mrb_state *mrb, mrb_webview_t *wv, mrb_sym name_sym,
                 mrb_value *out_data) {
   binding_ctx *ctx;
   struct RData *data;
-  Data_Make_Struct(mrb, mrb->object_class, binding_ctx,
+  Data_Make_Struct(mrb, binding_ctx_class(mrb), binding_ctx,
                    &binding_ctx_type, ctx, data);
   ctx->wv = wv;
   ctx->name_sym = name_sym;
@@ -279,12 +293,18 @@ static const struct mrb_data_type dispatch_ctx_type = {
   "Webview::DispatchCtx", dispatch_ctx_dfree
 };
 
+static struct RClass *
+dispatch_ctx_class(mrb_state *mrb) {
+  return mrb_class_get_under_id(mrb,
+    mrb_class_get_id(mrb, MRB_SYM(Webview)), MRB_SYM(DispatchCtx));
+}
+
 static dispatch_ctx *
 dispatch_ctx_new(mrb_state *mrb, mrb_webview_t *wv, mrb_int key,
                  mrb_value *out_data) {
   dispatch_ctx *ctx;
   struct RData *data;
-  Data_Make_Struct(mrb, mrb->object_class, dispatch_ctx,
+  Data_Make_Struct(mrb, dispatch_ctx_class(mrb), dispatch_ctx,
                    &dispatch_ctx_type, ctx, data);
   ctx->wv = wv;
   ctx->key = key;
@@ -401,8 +421,9 @@ mrb_webview_m_initialize(mrb_state *mrb, mrb_value self) {
 
   wv->handle = webview_create(debug ? 1 : 0, win);
   if (!wv->handle) {
-    mrb_raise(mrb, mrb_class_get_under(mrb, mrb_class_get(mrb, "Webview"), "Error"),
-              "failed to create webview (missing system dependencies?)");
+    mrb_raise(mrb,
+      mrb_class_get_under_id(mrb, mrb_class_get_id(mrb, MRB_SYM(Webview)), MRB_SYM(Error)),
+      "failed to create webview (missing system dependencies?)");
   }
   return self;
 }
@@ -668,8 +689,19 @@ mrb_webview_s_version(mrb_state *mrb, mrb_value self) {
 MRB_BEGIN_DECL
 void
 mrb_mruby_webview_gem_init(mrb_state *mrb) {
-  struct RClass *cls = mrb_define_class(mrb, "Webview", mrb->object_class);
-  MRB_SET_INSTANCE_TT(cls, MRB_TT_DATA);
+  struct RClass *cls = mrb_define_class_id(mrb, MRB_SYM(Webview), mrb->object_class);
+  MRB_SET_INSTANCE_TT(cls, MRB_TT_CDATA);
+
+  /* Internal Data wrapper classes used by binding_ctx_new and
+   * dispatch_ctx_new. Their instance type tag is MRB_TT_CDATA so
+   * Data_Make_Struct produces RData objects of the right shape, and their
+   * `new` is undefined so Ruby code can't construct them directly. */
+  struct RClass *bcls = mrb_define_class_under_id(mrb, cls, MRB_SYM(BindingCtx),  mrb->object_class);
+  struct RClass *dcls = mrb_define_class_under_id(mrb, cls, MRB_SYM(DispatchCtx), mrb->object_class);
+  MRB_SET_INSTANCE_TT(bcls, MRB_TT_CDATA);
+  MRB_SET_INSTANCE_TT(dcls, MRB_TT_CDATA);
+  mrb_undef_class_method_id(mrb, bcls, MRB_SYM(new));
+  mrb_undef_class_method_id(mrb, dcls, MRB_SYM(new));
 
   struct RClass *err = mrb_define_class_under(mrb, cls, "Error", E_RUNTIME_ERROR);
   mrb_define_class_under(mrb, cls, "MissingDependencyError", err);
