@@ -61,4 +61,4 @@ Errors raised from this gem all inherit from `Webview::Error`
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
