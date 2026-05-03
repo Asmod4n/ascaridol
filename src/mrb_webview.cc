@@ -676,6 +676,70 @@ mrb_webview_s_version(mrb_state *mrb, mrb_value self) {
 }
 
 /* ------------------------------------------------------------------------- */
+/* LSan suppressions baked into the binary                                   */
+/* ------------------------------------------------------------------------- */
+/*
+ * webview pulls in WebKitGTK / JavaScriptCore / fontconfig / Mesa EGL /
+ * Pango / GLib's GObject type system. All of those allocate process-
+ * lifetime singletons during their first call (atom-string interns, GType
+ * registrations behind pthread_once, EGL contexts, fontconfig caches) and
+ * intentionally never free them — there is no public shutdown API for any
+ * of them, and webview itself only exposes per-instance webview_destroy
+ * (no global teardown). Running the gem under -fsanitize=address therefore
+ * always reports those allocations as leaks even when every Webview /
+ * BindingCtx / DispatchCtx we own is properly destroyed.
+ *
+ * LSan looks up the symbol __lsan_default_suppressions at startup and
+ * uses whatever string it returns as a frame-matcher suppressions list —
+ * exactly the same format as an external suppressions file, but with no
+ * need for the user to set LSAN_OPTIONS. Defining it here means
+ * `mruby-webview` is leak-clean out of the box under ASan/LSan.
+ *
+ * The block is only emitted when the translation unit is built with
+ * sanitizers, so non-sanitized builds carry zero overhead.
+ */
+#if defined(__SANITIZE_ADDRESS__) || \
+    (defined(__has_feature) && __has_feature(address_sanitizer))
+extern "C" const char *__lsan_default_suppressions(void);
+extern "C" const char *__lsan_default_suppressions(void) {
+  return
+    /* WebKit / JavaScriptCore: process-lifetime singletons + atom strings. */
+    "leak:libwebkit2gtk\n"
+    "leak:libwebkitgtk\n"
+    "leak:libjavascriptcoregtk\n"
+    "leak:WTF::AtomStringImpl\n"
+    "leak:WTF::StringImpl\n"
+    "leak:JSC::JSGlobalObject\n"
+    /* fontconfig: pattern / language-set / config caches. */
+    "leak:libfontconfig\n"
+    "leak:FcValueSave\n"
+    "leak:FcLangSetCopy\n"
+    "leak:FcPatternAdd\n"
+    "leak:FcFontRenderPrepare\n"
+    /* Mesa EGL driver state. */
+    "leak:libEGL_mesa\n"
+    /* Pango / Cairo font + glyph caches. */
+    "leak:libpangocairo\n"
+    "leak:libpango\n"
+    "leak:libcairo\n"
+    /* GdkPixbuf module loader handles. */
+    "leak:libgdk_pixbuf\n"
+    /* GLib / GIO / GObject one-shot init reached via pthread_once. */
+    "leak:libgio-2.0\n"
+    "leak:libgobject-2.0\n"
+    "leak:libglib-2.0\n"
+    "leak:g_type_class_get\n"
+    "leak:g_type_register_static\n"
+    "leak:g_object_new\n"
+    "leak:g_object_new_with_properties\n"
+    "leak:g_malloc\n"
+    "leak:g_malloc0\n"
+    /* Anything reached via pthread_once is a one-shot library init. */
+    "leak:pthread_once\n";
+}
+#endif
+
+/* ------------------------------------------------------------------------- */
 /* Init                                                                      */
 /* ------------------------------------------------------------------------- */
 MRB_BEGIN_DECL
