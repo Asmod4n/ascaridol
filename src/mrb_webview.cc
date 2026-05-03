@@ -369,48 +369,14 @@ mrb_webview_free(mrb_state *mrb, void *p) {
 }
 
 /* ------------------------------------------------------------------------- */
-/* allocation / initialize / destroy                                         */
+/* initialize / destroy                                                      */
 /* ------------------------------------------------------------------------- */
-
-/* We override Class#new so the underlying mrb_webview_t is allocated via
- * Data_Make_Struct (no direct mrb_malloc in our code). The default
- * mrb_instance_alloc would hand `initialize` a Data object with a NULL
- * data pointer and force it to mrb_malloc the struct itself. */
-static mrb_value
-mrb_webview_s_new(mrb_state *mrb, mrb_value klass) {
-  mrb_webview_t *wv;
-  struct RData *data;
-  Data_Make_Struct(mrb, mrb_class_ptr(klass), mrb_webview_t,
-                   &mrb_webview_data_type, wv, data);
-  mrb_value obj = mrb_obj_value(data);
-  wv->mrb = mrb;
-  wv->self = obj;
-  /* wv->handle is already NULL because Data_Make_Struct zero-fills. */
-
-  /* Forward the original positional args + block to initialize. */
-  mrb_value *argv;
-  mrb_int argc;
-  mrb_value blk;
-  mrb_get_args(mrb, "*&", &argv, &argc, &blk);
-  mrb_funcall_with_block(mrb, obj, mrb_intern_lit(mrb, "initialize"),
-                         argc, argv, blk);
-  return obj;
-}
 
 static mrb_value
 mrb_webview_m_initialize(mrb_state *mrb, mrb_value self) {
   mrb_bool debug = FALSE;
   mrb_value window_handle = mrb_nil_value();
   mrb_get_args(mrb, "|bo", &debug, &window_handle);
-
-  mrb_webview_t *wv =
-    (mrb_webview_t *)mrb_data_get_ptr(mrb, self, &mrb_webview_data_type);
-
-  /* If initialize is called more than once, drop the previous handle. */
-  if (wv->handle) {
-    webview_destroy(wv->handle);
-    wv->handle = NULL;
-  }
 
   void *win = NULL;
   if (mrb_integer_p(window_handle)) {
@@ -419,6 +385,31 @@ mrb_webview_m_initialize(mrb_state *mrb, mrb_value self) {
     mrb_raise(mrb, E_TYPE_ERROR, "window must be nil or an integer (native handle)");
   }
 
+  /* Allocate the mrb_webview_t struct via Data_Make_Struct, then move
+   * ownership onto `self` (the outer Webview Data instance produced by
+   * Class#new). The throwaway tmp RData is disarmed and reclaimed by GC.
+   * This keeps Webview.new -> #initialize working — kwargs forwarding
+   * from the mrblib initialize override stays intact — without any
+   * direct mrb_malloc on our side. */
+  mrb_webview_t *wv;
+  struct RData *tmp;
+  Data_Make_Struct(mrb, mrb_obj_class(mrb, self), mrb_webview_t,
+                   &mrb_webview_data_type, wv, tmp);
+
+  /* If initialize is called more than once, free the previous wv. */
+  if (DATA_PTR(self) && DATA_TYPE(self) == &mrb_webview_data_type) {
+    mrb_webview_free(mrb, DATA_PTR(self));
+  }
+  DATA_PTR(self)  = wv;
+  DATA_TYPE(self) = &mrb_webview_data_type;
+
+  /* Disarm tmp so GC doesn't double-free wv when it collects the tmp
+   * RData wrapper. The dfree sees NULL and short-circuits. */
+  DATA_PTR(tmp)  = NULL;
+  DATA_TYPE(tmp) = NULL;
+
+  wv->mrb = mrb;
+  wv->self = self;
   wv->handle = webview_create(debug ? 1 : 0, win);
   if (!wv->handle) {
     mrb_raise(mrb,
@@ -712,7 +703,6 @@ mrb_mruby_webview_gem_init(mrb_state *mrb) {
   mrb_define_class_under(mrb, cls, "NotFoundError",          err);
   mrb_define_class_under(mrb, cls, "DestroyedError",         err);
 
-  mrb_define_class_method(mrb, cls, "new",   mrb_webview_s_new,           MRB_ARGS_ANY());
   mrb_define_method(mrb, cls, "initialize",   mrb_webview_m_initialize,   MRB_ARGS_OPT(2));
   mrb_define_method(mrb, cls, "destroy",      mrb_webview_m_destroy,      MRB_ARGS_NONE());
   mrb_define_method(mrb, cls, "destroyed?",   mrb_webview_m_destroyed_p,  MRB_ARGS_NONE());
