@@ -18,11 +18,10 @@
 
 /* The C API symbols (webview_create, webview_destroy, ...) live inside
  * libwebview.a, which is built from vendor/webview via its official CMake
- * project (see mrbgem.rake). Defining WEBVIEW_HEADER here gives us
- * declarations only; WEBVIEW_STATIC (set in mrbgem.rake too) makes those
- * declarations have plain `extern` linkage so they resolve at link time
- * against the static library. */
-#define WEBVIEW_HEADER
+ * project (see mrbgem.rake). mrbgem.rake also adds WEBVIEW_HEADER (so
+ * including the header here only emits declarations) and WEBVIEW_STATIC
+ * (so those declarations have plain `extern` linkage that resolves at
+ * link time against the static library). */
 #include <webview/webview.h>
 
 #include <stdlib.h>
@@ -404,9 +403,11 @@ mrb_webview_m_initialize(mrb_state *mrb, mrb_value self) {
   DATA_TYPE(self) = &mrb_webview_data_type;
 
   /* Disarm tmp so GC doesn't double-free wv when it collects the tmp
-   * RData wrapper. The dfree sees NULL and short-circuits. */
-  DATA_PTR(tmp)  = NULL;
-  DATA_TYPE(tmp) = NULL;
+   * RData wrapper. The dfree sees NULL and short-circuits. The DATA_PTR
+   * / DATA_TYPE macros expect an mrb_value, but Data_Make_Struct hands
+   * us the RData* directly, so we touch its fields here. */
+  tmp->data = NULL;
+  tmp->type = NULL;
 
   wv->mrb = mrb;
   wv->self = self;
