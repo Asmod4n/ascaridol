@@ -7,7 +7,7 @@ html = <<~HTML
   <!doctype html>
   <html>
     <head><meta charset="utf-8"><title>mruby-webview</title></head>
-    <body style="font-family: sans-serif; padding: 2em;">
+    <body style="padding: 2em;">
       <h1>Hello from mruby!</h1>
       <p>Click the button to call into Ruby.</p>
       <button id="btn">Greet</button>

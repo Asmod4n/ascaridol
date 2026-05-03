@@ -238,22 +238,6 @@ dispatch_invoke_body(mrb_state *mrb, void *p) {
   return mrb_yield(mrb, proc, mrb_nil_value());
 }
 
-static void
-invoke_dispatched_proc(mrb_state *mrb, mrb_value self, mrb_int key) {
-  int ai = mrb_gc_arena_save(mrb);
-
-  mrb_value dh = DISPATCH_HASH(mrb, self);
-  mrb_value k = mrb_convert_number(mrb, key);
-  mrb_value proc = mrb_hash_get(mrb, dh, k);
-  if (!mrb_nil_p(proc)) {
-    mrb_bool err = FALSE;
-    mrb_protect_error(mrb, dispatch_invoke_body, &proc, &err);
-    if (err) mrb_print_error(mrb);
-  }
-  mrb_hash_delete_key(mrb, dh, k);
-  mrb_gc_arena_restore(mrb, ai);
-}
-
 /* ------------------------------------------------------------------------- */
 /* initialize / destroy                                                      */
 /* ------------------------------------------------------------------------- */
@@ -262,13 +246,13 @@ static mrb_value
 mrb_webview_m_initialize(mrb_state *mrb, mrb_value self) {
   mrb_bool debug = FALSE;
   mrb_value window_handle = mrb_nil_value();
-  mrb_get_args(mrb, "|bo", &debug, &window_handle);
+  mrb_get_args(mrb, "|bo!", &debug, &window_handle);
 
   void *win = nullptr;
-  if (mrb_integer_p(window_handle)) {
-    win = reinterpret_cast<void *>(static_cast<uintptr_t>(mrb_integer(window_handle)));
+  if (mrb_cptr_p(window_handle)) {
+    win = mrb_cptr(window_handle);
   } else if (!mrb_nil_p(window_handle)) {
-    mrb_raise(mrb, E_TYPE_ERROR, "window must be nil or an integer (native handle)");
+    mrb_raise(mrb, E_TYPE_ERROR, "window must be nil or an cptr (native handle)");
   }
 
   /* Re-init: drop the previous instance via the helpers' destructor. */
@@ -533,21 +517,18 @@ mrb_webview_m_dispatch(mrb_state *mrb, mrb_value self) {
 
   mrb_value dh = DISPATCH_HASH(mrb, self);
 
-  mrb_value counter_v = mrb_iv_get(mrb, self, MRB_SYM(dispatch_counter));
-  mrb_int counter = mrb_integer_p(counter_v) ? mrb_integer(counter_v) : 0;
-  counter++;
-  mrb_iv_set(mrb, self, MRB_SYM(dispatch_counter), mrb_convert_number(mrb, counter));
-
-  mrb_value key = mrb_convert_number(mrb, counter);
+  mrb_value key = mrb_cptr_value(mrb, mrb_ptr(blk));
   mrb_hash_set(mrb, dh, key, blk);
 
-  /* webview holds the std::function in its dispatch queue, calls it once
-   * on the UI thread, then deletes it. The lambda captures the counter
-   * key so it can find the still-rooted block in @_dispatch_procs and
-   * remove it after firing. */
-  auto err = wv->dispatch([mrb, self, counter]() {
-    invoke_dispatched_proc(mrb, self, counter);
+  auto err = wv->dispatch([mrb, self, blk, key]() {
+      mrb_value b = blk;
+      mrb_bool exc = FALSE;
+      mrb_protect_error(mrb, dispatch_invoke_body, &b, &exc);
+      if (exc) mrb_print_error(mrb);
+      mrb_clear_error(mrb);
+      mrb_hash_delete_key(mrb, DISPATCH_HASH(mrb, self), key);
   });
+
   if (!err.ok()) {
     mrb_hash_delete_key(mrb, dh, key);
     webview_check_result(mrb, err);
@@ -565,14 +546,7 @@ mrb_webview_m_bindings(mrb_state *mrb, mrb_value self) {
   mrb_value result = mrb_ary_new_capa(mrb, len);
 
   for (mrb_int i = 0; i < len; i++) {
-    mrb_value k = RARRAY_PTR(keys)[i];
-    if (mrb_symbol_p(k)) {
-      mrb_int name_len;
-      const char *name = mrb_sym_name_len(mrb, mrb_symbol(k), &name_len);
-      mrb_ary_push(mrb, result, mrb_str_new(mrb, name, name_len));
-    } else {
-      mrb_ary_push(mrb, result, mrb_funcall_id(mrb, k, MRB_SYM(to_s), 0));
-    }
+    mrb_ary_push(mrb, result, mrb_ary_ref(mrb, keys, i));
   }
   return result;
 }
