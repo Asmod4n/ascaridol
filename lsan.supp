@@ -35,3 +35,24 @@ leak:libpangocairo
 
 # GLib's GType system one-time class init reached via pthread_once.
 leak:g_type_class_get
+leak:g_type_register_static
+leak:g_object_new
+leak:g_object_new_with_properties
+leak:libgobject-2.0
+leak:libglib-2.0
+leak:g_malloc
+leak:g_malloc0
+
+# GLib spawns a few worker threads (gmain, gdbus) that hold per-thread
+# state for the entire process lifetime.
+leak:libgio-2.0
+
+# Cairo font + glyph caches.
+leak:libcairo
+
+# GdkPixbuf / GIO module loaders cache module handles.
+leak:libgdk_pixbuf
+
+# Anything reached via pthread_once is a one-shot library init by
+# definition.
+leak:pthread_once
