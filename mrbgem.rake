@@ -6,13 +6,17 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
   spec.summary = 'Idiomatic Ruby bindings for the webview/webview library'
   spec.version = '0.1.0'
 
-  spec.add_dependency 'mruby-json',     core: 'mruby-json'
+  spec.add_dependency 'mruby-fast-json', github: 'asmod4n/mruby-fast-json'
   spec.add_dependency 'mruby-string-ext', core: 'mruby-string-ext'
   spec.add_dependency 'mruby-hash-ext',   core: 'mruby-hash-ext'
   spec.add_dependency 'mruby-symbol-ext', core: 'mruby-symbol-ext'
   spec.add_dependency 'mruby-error',      core: 'mruby-error'
   spec.add_dependency 'mruby-proc-ext',   core: 'mruby-proc-ext'
   spec.add_dependency 'mruby-metaprog',   core: 'mruby-metaprog'
+
+  # mruby-fast-json requires UTF-8 string support.
+  spec.cc.defines  << 'MRB_UTF8_STRING'
+  spec.cxx.defines << 'MRB_UTF8_STRING'
 
   webview_version = ENV['MRUBY_WEBVIEW_VERSION'] || '0.12.0'
   webview_repo    = ENV['MRUBY_WEBVIEW_REPO']    || 'https://github.com/webview/webview.git'

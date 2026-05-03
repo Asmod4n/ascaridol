@@ -18,10 +18,13 @@ end
 
 `mrbgem.rake` will:
 
-1. Clone the upstream `webview/webview` source into `vendor/webview` (override
+1. Pull in [`mruby-fast-json`](https://github.com/asmod4n/mruby-fast-json) for
+   the JSON round-trip used by `bind` (and define `MRB_UTF8_STRING`, which it
+   requires).
+2. Clone the upstream `webview/webview` source into `vendor/webview` (override
    with `MRUBY_WEBVIEW_DIR`, `MRUBY_WEBVIEW_REPO`, `MRUBY_WEBVIEW_VERSION`).
-2. Compile `core/src/webview.cc` with your toolchain's C++ compiler.
-3. Detect platform libraries via `pkg-config` (Linux) or platform frameworks
+3. Compile `core/src/webview.cc` with your toolchain's C++ compiler.
+4. Detect platform libraries via `pkg-config` (Linux) or platform frameworks
    (macOS/Windows) and add the right link flags.
 
 ### System dependencies
