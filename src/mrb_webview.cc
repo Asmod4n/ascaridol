@@ -23,6 +23,7 @@
  * (so those declarations have plain `extern` linkage that resolves at
  * link time against the static library). */
 #include <webview/webview.h>
+#include <mruby/fast_json.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -105,8 +106,7 @@ mrb_webview_json_parse(mrb_state *mrb, const char *src) {
 
 static mrb_value
 mrb_webview_json_dump(mrb_state *mrb, mrb_value v) {
-  struct RClass *json = mrb_module_get(mrb, "JSON");
-  return mrb_funcall(mrb, mrb_obj_value(json), "dump", 1, v);
+  return mrb_json_dump(mrb, v);
 }
 
 /* ------------------------------------------------------------------------- */
