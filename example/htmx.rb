@@ -45,63 +45,50 @@ end
 MRUBY_ROUTER_EXT = <<~'JS'
   <script>
     (function () {
+      var SEL = '[rb-get],[rb-post],[rb-put],[rb-patch],[rb-delete]';
       var VERBS = ['get', 'post', 'put', 'patch', 'delete'];
 
-      function wireUp(root) {
-        var sel = VERBS.map(function(v) { return '[rb-' + v + ']'; }).join(',');
-        var elts = [];
-        if (root.matches && root.matches(sel)) elts.push(root);
-        root.querySelectorAll && elts.push.apply(elts, root.querySelectorAll(sel));
+      function dispatch(elt, e) {
+        e.preventDefault();
 
-        elts.forEach(function (elt) {
-          if (elt._rbWired) return;
-          elt._rbWired = true;
-
-          var method, path;
-          for (var i = 0; i < VERBS.length; i++) {
-            var v = VERBS[i];
-            if (elt.hasAttribute('rb-' + v)) {
-              method = v.toUpperCase();
-              path   = elt.getAttribute('rb-' + v);
-              break;
-            }
+        var method, path;
+        for (var i = 0; i < VERBS.length; i++) {
+          if (elt.hasAttribute('rb-' + VERBS[i])) {
+            method = VERBS[i].toUpperCase();
+            path   = elt.getAttribute('rb-' + VERBS[i]);
+            break;
           }
+        }
 
-          var trigger = elt.tagName === 'FORM' ? 'submit' : 'click';
+        var params = {};
+        var raw = elt.getAttribute('rb-vals');
+        if (raw) try { Object.assign(params, JSON.parse(raw)); } catch (_) {}
+        if (elt.tagName === 'FORM') {
+          new FormData(elt).forEach(function (v, k) { params[k] = v; });
+        }
 
-          elt.addEventListener(trigger, function (e) {
-            e.preventDefault();
+        var targetSel = elt.getAttribute('rb-target');
+        var target    = targetSel ? document.querySelector(targetSel) : elt;
+        var swap      = elt.getAttribute('rb-swap') || 'innerHTML';
 
-            var params = {};
-            var raw = elt.getAttribute('rb-vals');
-            if (raw) try { Object.assign(params, JSON.parse(raw)); } catch (_) {}
-            if (elt.tagName === 'FORM') {
-              new FormData(elt).forEach(function (v, k) { params[k] = v; });
-            }
-
-            var targetSel = elt.getAttribute('rb-target');
-            var target    = targetSel ? document.querySelector(targetSel) : elt;
-            var swap      = elt.getAttribute('rb-swap') || 'innerHTML';
-
-            window.htmx_route(method, path, params).then(function (html) {
-              if (swap === 'outerHTML') {
-                target.outerHTML = html;
-              } else {
-                target.innerHTML = html;
-              }
-              htmx.process(document.body);
-              if (elt.hasAttribute('rb-reset') && elt.tagName === 'FORM') elt.reset();
-            }).catch(function (err) {
-              console.error('[mruby-router]', err && err.message || err);
-            });
-          });
+        window.htmx_route(method, path, params).then(function (html) {
+          if (swap === 'outerHTML') target.outerHTML = html;
+          else                      target.innerHTML = html;
+          if (elt.hasAttribute('rb-reset') && elt.tagName === 'FORM') elt.reset();
+        }).catch(function (err) {
+          console.error('[mruby-router]', err && err.message || err);
         });
       }
 
-      htmx.defineExtension('mruby-router', {
-        onEvent: function (name, evt) {
-          if (name === 'htmx:load') wireUp(evt.detail.elt);
-        }
+      document.addEventListener('click', function (e) {
+        var elt = e.target.closest(SEL);
+        if (!elt || elt.tagName === 'FORM') return;
+        dispatch(elt, e);
+      });
+
+      document.addEventListener('submit', function (e) {
+        if (!e.target.matches || !e.target.matches(SEL)) return;
+        dispatch(e.target, e);
       });
     })();
   </script>
