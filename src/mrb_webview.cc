@@ -110,6 +110,14 @@ str_from(mrb_state *mrb, const std::string &s) {
 
 /* ------------------------------------------------------------------------- */
 /* Internal storage on the Webview instance                                  */
+/*                                                                           */
+/* Two hidden iv tables (the symbol names omit a leading "@", so they don't  */
+/* show up in instance_variables but still live in the same iv table) keep   */
+/* the user's Ruby objects GC-rooted for as long as the C++ side can reach   */
+/* them. `bindings` maps name_sym -> Proc (binding callbacks); `fds_procs`   */
+/* maps fd_obj -> Webview::_FDUD instance (native event watchers). The       */
+/* lambdas / fd-userdata we hand to webview only carry the lookup key, never */
+/* the Proc itself.                                                          */
 /* ------------------------------------------------------------------------- */
 
 static mrb_value
@@ -165,11 +173,11 @@ make_error_json_str(mrb_state *mrb, mrb_value name, mrb_value message) {
   return to_std_string(mrb_json_dump(mrb, h));
 }
 
-/* Runs synchronously on the UI thread (== the mruby thread): looks up
- * the Ruby block in @_bindings via name_sym, parses the JSON args,
- * invokes the block, and resolves the JS-side promise via wv->resolve.
- * Exceptions from JSON parse / proc call / JSON dump get mapped onto
- * resolve(id, 1, "{name:, message:}"). */
+/* Runs synchronously on the UI thread (== the mruby thread): looks up the
+ * Ruby block in the hidden `bindings` iv table via name_sym, parses the
+ * JSON args, invokes the block, and resolves the JS-side promise via
+ * wv->resolve. Exceptions from JSON parse / proc call / JSON dump get
+ * mapped onto resolve(id, 1, "{name:, message:}"). */
 static void
 invoke_bound_proc(mrb_state *mrb, mrb_value self, mrb_sym name_sym,
                   webview::webview *wv,
@@ -260,11 +268,13 @@ static mrb_value
 mrb_webview_m_destroy(mrb_state *mrb, mrb_value self) {
   webview::webview *wv = mrb_cpp_get<webview::webview>(mrb, self);
   if (wv) {
-    /* The C++ destructor unbinds every binding and tears down the GTK
-     * window. The std::function lambdas we passed to bind / dispatch are
-     * destroyed with it; their captures (mrb_value self, mrb_sym name)
-     * are released. Removing the iv hashes drops the last references to
-     * the user's blocks so GC reclaims them. */
+    /* The C++ destructor unbinds every binding and tears down the
+     * platform window (GTK / Cocoa / WebView2). The std::function lambdas
+     * we passed to bind are destroyed with it; their captures (mrb, self,
+     * name_sym, wv) are released. Wiping the hidden `bindings` iv table
+     * drops the last references to the user's blocks so GC reclaims
+     * them; wiping `fds_procs` releases the Webview::_FDUD wrappers,
+     * whose destructors detach any still-attached GLib fd watchers. */
     mrb_cpp_delete<webview::webview>(mrb, wv);
     DATA_PTR(self) = nullptr;
     DATA_TYPE(self) = nullptr;
@@ -444,11 +454,12 @@ mrb_webview_m_bind(mrb_state *mrb, mrb_value self) {
     return self;
   }
 
-  /* Fresh registration: hand webview a std::function lambda. The lambda
-   * captures everything it needs; @_bindings keeps the user's block
-   * GC-rooted while the binding is live. The lambda outlives nothing it
-   * captures: webview destroys all bindings in its destructor, which
-   * runs before the wrapping Webview Data instance dies. */
+  /* Fresh registration: hand webview a std::function lambda capturing
+   * (mrb, self, name_sym, wv). The hidden `bindings` iv table keeps the
+   * user's block GC-rooted while the binding is live; the lambda just
+   * does a hash lookup on every JS call. The lambda outlives nothing it
+   * captures — webview destroys every binding in its destructor, which
+   * runs before the wrapping Webview Data instance is freed. */
   mrb_int name_len;
   const char *name = mrb_sym_name_len(mrb, name_sym, &name_len);
   std::string name_str{name, static_cast<size_t>(name_len)};
