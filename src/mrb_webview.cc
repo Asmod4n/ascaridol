@@ -122,8 +122,8 @@ iv_hash(mrb_state *mrb, mrb_value self, mrb_sym sym) {
   return h;
 }
 
-#define BINDINGS_HASH(mrb, self) iv_hash(mrb, self, MRB_SYM(bindings))
-#define DISPATCH_HASH(mrb, self) iv_hash(mrb, self, MRB_SYM(dispatch_procs))
+#define BINDINGS_HASH(mrb, self)  iv_hash(mrb, self, MRB_SYM(bindings))
+#define FDS_HASH(mrb, self)       iv_hash(mrb, self, MRB_SYM(fds_procs))
 
 /* ------------------------------------------------------------------------- */
 /* Bind callback machinery (lambda body)                                     */
@@ -176,9 +176,9 @@ invoke_bound_proc(mrb_state *mrb, mrb_value self, mrb_sym name_sym,
                   const std::string &id, const std::string &req) {
   int ai = mrb_gc_arena_save(mrb);
 
-  mrb_value proc = mrb_hash_get(mrb, BINDINGS_HASH(mrb, self),
-                                mrb_symbol_value(name_sym));
-  if (mrb_nil_p(proc)) {
+  mrb_value proc = mrb_hash_fetch(mrb, BINDINGS_HASH(mrb, self),
+                                mrb_symbol_value(name_sym), mrb_undef_value());
+  if (!mrb_proc_p(proc)) {
     wv->resolve(id, 1,
                 "{\"name\":\"Error\",\"message\":\"binding not registered\"}");
     mrb_gc_arena_restore(mrb, ai);
@@ -228,16 +228,6 @@ invoke_bound_proc(mrb_state *mrb, mrb_value self, mrb_sym name_sym,
 }
 
 /* ------------------------------------------------------------------------- */
-/* Dispatch callback machinery (lambda body)                                 */
-/* ------------------------------------------------------------------------- */
-
-static mrb_value
-dispatch_invoke_body(mrb_state *mrb, void *p) {
-  mrb_value proc = *static_cast<mrb_value *>(p);
-  return mrb_yield(mrb, proc, mrb_nil_value());
-}
-
-/* ------------------------------------------------------------------------- */
 /* initialize / destroy                                                      */
 /* ------------------------------------------------------------------------- */
 
@@ -247,22 +237,19 @@ mrb_webview_m_initialize(mrb_state *mrb, mrb_value self) {
   mrb_value window_handle = mrb_nil_value();
   mrb_get_args(mrb, "|bo!", &debug, &window_handle);
 
-  void *win = nullptr;
+  void *window = nullptr;
   if (mrb_cptr_p(window_handle)) {
-    win = mrb_cptr(window_handle);
+    window = mrb_cptr(window_handle);
   } else if (!mrb_nil_p(window_handle)) {
     mrb_raise(mrb, E_TYPE_ERROR, "window must be nil or an cptr (native handle)");
   }
 
-  /* Re-init: drop the previous instance via the helpers' destructor. */
   if (DATA_PTR(self)) {
-    mrb_cpp_delete<webview::webview>(mrb, mrb_cpp_get<webview::webview>(mrb, self));
-    DATA_PTR(self) = nullptr;
-    DATA_TYPE(self) = nullptr;
+    mrb_raise(mrb, E_RUNTIME_ERROR, "already initialized");
   }
 
   try {
-    mrb_cpp_new<webview::webview>(mrb, self, static_cast<bool>(debug), win);
+    mrb_cpp_new<webview::webview>(mrb, self, static_cast<bool>(debug), window);
   } catch (const webview::exception &e) {
     webview_check(mrb, e.error().code(), e.error().message());
   }
@@ -282,7 +269,7 @@ mrb_webview_m_destroy(mrb_state *mrb, mrb_value self) {
     DATA_PTR(self) = nullptr;
     DATA_TYPE(self) = nullptr;
     mrb_iv_remove(mrb, self, MRB_SYM(bindings));
-    mrb_iv_remove(mrb, self, MRB_SYM(dispatch_procs));
+    mrb_iv_remove(mrb, self, MRB_SYM(fds_procs));
   }
   return mrb_nil_value();
 }
@@ -341,12 +328,12 @@ static mrb_value
 mrb_webview_m_set_size(mrb_state *mrb, mrb_value self) {
   mrb_int w, h;
   mrb_value hint_v = mrb_nil_value();
-  mrb_get_args(mrb, "ii|o", &w, &h, &hint_v);
+  mrb_get_args(mrb, "ii|o!", &w, &h, &hint_v);
   webview::webview *wv = get_webview(mrb, self);
-  webview_hint_t hint = hint_from_mrb(mrb, hint_v);
+  webview_hint_t hints = hint_from_mrb(mrb, hint_v);
 
 
-  webview_check_result(mrb, wv->set_size(static_cast<int>(w), static_cast<int>(h), hint));
+  webview_check_result(mrb, wv->set_size(static_cast<int>(w), static_cast<int>(h), hints));
   return self;
 }
 
@@ -371,7 +358,7 @@ mrb_webview_m_set_html(mrb_state *mrb, mrb_value self) {
 }
 
 static mrb_value
-mrb_webview_m_init_js(mrb_state *mrb, mrb_value self) {
+mrb_webview_m_init(mrb_state *mrb, mrb_value self) {
   const char *js;
   mrb_int len;
   mrb_get_args(mrb, "s", &js, &len);
@@ -504,40 +491,6 @@ mrb_webview_m_return(mrb_state *mrb, mrb_value self) {
   return self;
 }
 
-/* ------------------------------------------------------------------------- */
-/* dispatch                                                                  */
-/* ------------------------------------------------------------------------- */
-
-static mrb_value
-mrb_webview_m_dispatch(mrb_state *mrb, mrb_value self) {
-  webview::webview *wv = get_webview(mrb, self);
-  mrb_value blk = mrb_nil_value();
-  mrb_get_args(mrb, "&", &blk);
-  if (mrb_nil_p(blk)) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "dispatch requires a block");
-  }
-
-  mrb_value dh = DISPATCH_HASH(mrb, self);
-
-  mrb_value key = mrb_cptr_value(mrb, mrb_ptr(blk));
-  mrb_hash_set(mrb, dh, key, blk);
-
-  auto err = wv->dispatch([mrb, self, blk, key]() {
-      mrb_value b = blk;
-      mrb_bool exc = FALSE;
-      mrb_protect_error(mrb, dispatch_invoke_body, &b, &exc);
-      if (exc) mrb_print_error(mrb);
-      mrb_clear_error(mrb);
-      mrb_hash_delete_key(mrb, DISPATCH_HASH(mrb, self), key);
-  });
-
-  if (!err.ok()) {
-    mrb_hash_delete_key(mrb, dh, key);
-    webview_check_result(mrb, err);
-  }
-  return self;
-}
-
 static mrb_value
 mrb_webview_m_bindings(mrb_state *mrb, mrb_value self) {
   mrb_value bh = mrb_iv_get(mrb, self, MRB_SYM(bindings));
@@ -577,6 +530,104 @@ mrb_webview_s_version(mrb_state *mrb, mrb_value self) {
   return h;
 }
 
+#ifdef WEBVIEW_GTK
+#include <glib-unix.h>
+
+struct mrb_webview_fd_ud {
+  mrb_state *mrb;
+  mrb_value wv;
+  mrb_value fd;
+  mrb_value blk;
+  guint id = 0;
+
+  ~mrb_webview_fd_ud() {
+    if (id) g_source_remove(id);
+  }
+};
+
+MRB_CPP_DEFINE_TYPE(mrb_webview_fd_ud, Webview_Userdata);
+
+static mrb_value
+mrb_webview_userdata_init(mrb_state *mrb, mrb_value self)
+{
+  mrb_value wv, fd, blk;
+  mrb_get_args(mrb, "ooo", &wv, &fd, &blk);
+
+  mrb_iv_set(mrb, self, MRB_SYM(wv), wv);
+  mrb_iv_set(mrb, self, MRB_SYM(fd), fd);
+  mrb_iv_set(mrb, self, MRB_SYM(blk), blk);
+
+  mrb_cpp_new<mrb_webview_fd_ud>(mrb, self);
+
+  mrb_webview_fd_ud *fd_ud = mrb_cpp_get<mrb_webview_fd_ud>(mrb, self);
+  fd_ud->mrb = mrb;
+  fd_ud->wv = wv;
+  fd_ud->fd = fd;
+  fd_ud->blk = blk;
+
+  return self;
+}
+
+gboolean on_fd_ready(gint fd, GIOCondition condition, gpointer user_data) {
+  struct mrb_webview_fd_ud *fd_ud = static_cast<mrb_webview_fd_ud*>(user_data);
+  mrb_state *mrb = fd_ud->mrb;
+
+  mrb_int idx = mrb_gc_arena_save(mrb);
+  const mrb_value argv[] = {
+    fd_ud->fd, mrb_convert_number(mrb, condition)
+  };
+  mrb_bool cont = mrb_test(mrb_yield_argv(mrb, fd_ud->blk, 2, argv));
+  if (!cont) {
+    mrb_value fds_hash = FDS_HASH(mrb, fd_ud->wv);
+    fd_ud->id = 0;
+    mrb_hash_delete_key(mrb, fds_hash, fd_ud->fd);
+  }
+  mrb_gc_arena_restore(mrb, idx);
+  return (gboolean) cont;
+}
+
+static mrb_value
+mrb_webview_add_native_event(mrb_state *mrb, mrb_value self)
+{
+  mrb_value fd_obj, blk = mrb_nil_value();
+  mrb_get_args(mrb, "o&", &fd_obj, &blk);
+  if (mrb_nil_p(blk)) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
+  }
+  if (!mrb_proc_p(blk)) {
+    mrb_raise(mrb, E_TYPE_ERROR, "not a block");
+  }
+  mrb_value fds_hash = FDS_HASH(mrb, self);
+  int fd = (int) mrb_integer(mrb_type_convert(mrb, fd_obj, MRB_TT_INTEGER, MRB_SYM(fileno)));
+
+  const mrb_value argv[] = {
+    self, fd_obj, blk
+  };
+  mrb_value fd_ud_obj = mrb_obj_new(mrb, mrb_class_get_under_id(mrb, mrb_class(mrb, self), MRB_SYM(_FDUD)), 3, argv);
+  mrb_hash_set(mrb, fds_hash, fd_obj, fd_ud_obj);
+
+  mrb_webview_fd_ud *fd_ud = mrb_cpp_get<mrb_webview_fd_ud>(mrb, fd_ud_obj);
+  fd_ud->id = g_unix_fd_add(fd, G_IO_IN, on_fd_ready, DATA_PTR(fd_ud_obj));
+  return self;
+}
+
+static mrb_value
+mrb_webview_remove_native_event(mrb_state *mrb, mrb_value self)
+{
+  mrb_value fd_obj;
+  mrb_get_args(mrb, "o", &fd_obj);
+  mrb_value fds_hash = FDS_HASH(mrb, self);
+  mrb_value fd_ud_obj = mrb_hash_fetch(mrb, fds_hash, fd_obj, mrb_undef_value());
+  if (!mrb_undef_p(fd_ud_obj)) {
+    mrb_webview_fd_ud *fd_ud = mrb_cpp_get<mrb_webview_fd_ud>(mrb, fd_ud_obj);
+    g_source_remove(fd_ud->id);
+    fd_ud->id = 0;
+    mrb_hash_delete_key(mrb, fds_hash, fd_obj);
+  }
+  return self;
+}
+#endif
+
 /* ------------------------------------------------------------------------- */
 /* Init                                                                      */
 /* ------------------------------------------------------------------------- */
@@ -585,6 +636,9 @@ void
 mrb_mruby_webview_gem_init(mrb_state *mrb) {
   struct RClass *cls = mrb_define_class_id(mrb, MRB_SYM(Webview), mrb->object_class);
   MRB_SET_INSTANCE_TT(cls, MRB_TT_CDATA);
+  struct RClass *ud_cls = mrb_define_class_under_id(mrb, cls, MRB_SYM(_FDUD), mrb->object_class);
+  mrb_define_method_id(mrb, ud_cls, MRB_SYM(initialize), mrb_webview_userdata_init, MRB_ARGS_REQ(2));
+  MRB_SET_INSTANCE_TT(ud_cls, MRB_TT_CDATA);
 
   struct RClass *err = mrb_define_class_under_id(mrb, cls, MRB_SYM(Error), E_RUNTIME_ERROR);
   mrb_define_class_under_id(mrb, cls, MRB_SYM(MissingDependencyError), err);
@@ -609,8 +663,8 @@ mrb_mruby_webview_gem_init(mrb_state *mrb) {
   mrb_define_method_id(mrb, cls, MRB_SYM_E(url),         mrb_webview_m_navigate,      MRB_ARGS_REQ(1));
   mrb_define_method_id(mrb, cls, MRB_SYM(set_html),      mrb_webview_m_set_html,      MRB_ARGS_REQ(1));
   mrb_define_method_id(mrb, cls, MRB_SYM_E(html),        mrb_webview_m_set_html,      MRB_ARGS_REQ(1));
-  mrb_define_method_id(mrb, cls, MRB_SYM(init_script),   mrb_webview_m_init_js,       MRB_ARGS_REQ(1));
-  mrb_define_method_id(mrb, cls, MRB_SYM(eval_script),   mrb_webview_m_eval,          MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM(init),           mrb_webview_m_init,         MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, cls, MRB_SYM(eval),           mrb_webview_m_eval,         MRB_ARGS_REQ(1));
 
   mrb_define_method_id(mrb, cls, MRB_SYM(window_handle), mrb_webview_m_window_handle, MRB_ARGS_NONE());
   mrb_define_method_id(mrb, cls, MRB_SYM(handle), mrb_webview_m_native_handle, MRB_ARGS_OPT(1));
@@ -619,8 +673,9 @@ mrb_mruby_webview_gem_init(mrb_state *mrb) {
   mrb_define_method_id(mrb, cls, MRB_SYM(unbind),        mrb_webview_m_unbind,        MRB_ARGS_REQ(1));
   mrb_define_method_id(mrb, cls, MRB_SYM(return_result), mrb_webview_m_return,        MRB_ARGS_REQ(3));
 
-  mrb_define_method_id(mrb, cls, MRB_SYM(dispatch),      mrb_webview_m_dispatch,      MRB_ARGS_BLOCK());
   mrb_define_method_id(mrb, cls, MRB_SYM(bindings),      mrb_webview_m_bindings,      MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, cls, MRB_SYM(add_native_event), mrb_webview_add_native_event, MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK());
+  mrb_define_method_id(mrb, cls, MRB_SYM(remove_native_event), mrb_webview_remove_native_event, MRB_ARGS_REQ(1));
 
   mrb_define_class_method_id(mrb, cls, MRB_SYM(version), mrb_webview_s_version,       MRB_ARGS_NONE());
 }

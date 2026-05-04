@@ -22,7 +22,8 @@ html = <<~HTML
   </html>
 HTML
 
-Webview.open(title: 'mruby-webview demo', size: [640, 480, :none], debug: true) do |w|
+
+Webview.open(title: 'mruby-webview demo', size: [640, 480], debug: true) do |w|
   w.bind(:greet) do |name|
     "Hello, #{name}! (replied at #{Time.now rescue 'now'})"
   end

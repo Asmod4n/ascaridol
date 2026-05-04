@@ -59,9 +59,6 @@ class Webview
 
   # Convenience accessors mirroring the C API.
   def title=(t); set_title(t.to_s); end
-  alias eval eval_script
-  alias evaluate eval_script
-  alias init_js init_script
 
   def to_s
     "#<Webview destroyed=#{destroyed?}>"
@@ -75,7 +72,7 @@ class Webview
   # stack and can use instanceof / .message normally.
   def _install_error_shim(name)
     js_name = name.to_s.inspect
-    init_script(<<~JS)
+    init(<<~JS)
       (function () {
         var fn = window[#{js_name}];
         if (typeof fn !== 'function') return;

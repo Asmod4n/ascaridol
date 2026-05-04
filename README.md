@@ -42,14 +42,13 @@ w.title = 'My App'
 w.set_size(800, 600)   # :none / :min / :max
 w.url  = 'https://example.com'
 w.html = '<h1>hi</h1>'
-w.init_script(js)              # runs on every navigation
-w.eval_script(js)              # eval in the current page
+w.init(js)              # runs on every navigation
+w.eval(js)              # eval in the current page
 
 w.bind(:add) { |a, b| a + b } # block return value resolves the JS promise;
                                # raising rejects it with { name:, message: }
 w.unbind(:add)
 
-w.dispatch { ... }             # run a block on the UI thread
 w.run                          # blocks until terminate / window closed
 w.terminate
 w.destroy
