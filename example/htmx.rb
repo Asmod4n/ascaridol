@@ -1,13 +1,11 @@
 # htmx desktop app via mruby-webview
 #
-# Run with:  ./bin/mruby htmx.rb
+# Run with:  ./bin/mruby example/htmx.rb
 #
-# Instead of replacing XMLHttpRequest/fetch, we hook htmx's own event system:
-#   htmx:beforeRequest → preventDefault → call Ruby → swap via htmx API
-#
-# Only the URL constructor is patched, because htmx calls
-# new URL(path, document.location.href) for origin-validation before the
-# event fires, and document.location.href is "about:blank" in set_html pages.
+# The "mruby-router" extension works like htmx's own ws/sse extensions:
+# it owns its own custom attributes (rb-post, rb-get, rb-delete, rb-target,
+# rb-swap, rb-reset) and wires up DOM event listeners on htmx:load.
+# htmx's request pipeline (XHR / fetch / beforeRequest) is never touched.
 
 $count = 0
 $todos = ["Buy milk", "Ship it"]
@@ -21,14 +19,93 @@ def render_todos
     "<li class=\"todo-item\">" \
     "<span>#{t}</span>" \
     "<button class=\"del\"" \
-    " hx-delete=\"/todos\"" \
-    " hx-vals='{\"idx\":\"#{i}\"}'" \
-    " hx-target=\"#todo-list\"" \
-    " hx-swap=\"outerHTML\">x</button>" \
+    " rb-delete=\"/todos\"" \
+    " rb-vals='{\"idx\":\"#{i}\"}'" \
+    " rb-target=\"#todo-list\"" \
+    " rb-swap=\"outerHTML\">x</button>" \
     "</li>"
   end.join
   "<ul id='todo-list'>#{items}</ul>"
 end
+
+# htmx extension: mruby-router
+#
+# Recognised attributes (mirror htmx naming, rb- prefix):
+#   rb-get / rb-post / rb-put / rb-patch / rb-delete  — verb + path
+#   rb-target   — CSS selector for the swap target (default: self)
+#   rb-swap     — "innerHTML" (default) | "outerHTML"
+#   rb-vals     — JSON object merged into params (same as hx-vals)
+#   rb-reset    — if present on a <form>, reset it after a successful call
+#
+# The extension listens for htmx:load (fires whenever htmx processes new
+# nodes, including the initial body) and attaches one event listener per
+# element. That listener calls window.htmx_route — the Ruby binding — and
+# performs the swap + htmx.process entirely in JS, with no dependency on
+# htmx internals beyond htmx:load and htmx.process (both stable public API).
+MRUBY_ROUTER_EXT = <<~'JS'
+  <script>
+    (function () {
+      var VERBS = ['get', 'post', 'put', 'patch', 'delete'];
+
+      function wireUp(root) {
+        var sel = VERBS.map(function(v) { return '[rb-' + v + ']'; }).join(',');
+        var elts = [];
+        if (root.matches && root.matches(sel)) elts.push(root);
+        root.querySelectorAll && elts.push.apply(elts, root.querySelectorAll(sel));
+
+        elts.forEach(function (elt) {
+          if (elt._rbWired) return;
+          elt._rbWired = true;
+
+          var method, path;
+          for (var i = 0; i < VERBS.length; i++) {
+            var v = VERBS[i];
+            if (elt.hasAttribute('rb-' + v)) {
+              method = v.toUpperCase();
+              path   = elt.getAttribute('rb-' + v);
+              break;
+            }
+          }
+
+          var trigger = elt.tagName === 'FORM' ? 'submit' : 'click';
+
+          elt.addEventListener(trigger, function (e) {
+            e.preventDefault();
+
+            var params = {};
+            var raw = elt.getAttribute('rb-vals');
+            if (raw) try { Object.assign(params, JSON.parse(raw)); } catch (_) {}
+            if (elt.tagName === 'FORM') {
+              new FormData(elt).forEach(function (v, k) { params[k] = v; });
+            }
+
+            var targetSel = elt.getAttribute('rb-target');
+            var target    = targetSel ? document.querySelector(targetSel) : elt;
+            var swap      = elt.getAttribute('rb-swap') || 'innerHTML';
+
+            window.htmx_route(method, path, params).then(function (html) {
+              if (swap === 'outerHTML') {
+                target.outerHTML = html;
+              } else {
+                target.innerHTML = html;
+              }
+              htmx.process(document.body);
+              if (elt.hasAttribute('rb-reset') && elt.tagName === 'FORM') elt.reset();
+            }).catch(function (err) {
+              console.error('[mruby-router]', err && err.message || err);
+            });
+          });
+        });
+      }
+
+      htmx.defineExtension('mruby-router', {
+        onEvent: function (name, evt) {
+          if (name === 'htmx:load') wireUp(evt.detail.elt);
+        }
+      });
+    })();
+  </script>
+JS
 
 def render_page
   <<~HTML
@@ -37,11 +114,10 @@ def render_page
     <head>
       <meta charset="utf-8">
       <title>htmx desktop</title>
-      <base href="http://localhost/">
-      #{URL_PATCH}
-      <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.10/dist/htmx.min.js" 
-          integrity="sha384-H5SrcfygHmAuTDZphMHqBJLc3FhssKjG7w/CeCpFReSfwBWDTKpkzPP8c+cLsK+V" crossorigin="anonymous"></script>
-      #{HTMX_HOOK}
+      <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.10/dist/htmx.min.js"
+          integrity="sha384-H5SrcfygHmAuTDZphMHqBJLc3FhssKjG7w/CeCpFReSfwBWDTKpkzPP8c+cLsK+V"
+          crossorigin="anonymous"></script>
+      #{MRUBY_ROUTER_EXT}
       <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Courier New', monospace; background: #0f0f0f; color: #e8e8e8; padding: 2rem; }
@@ -73,7 +149,7 @@ def render_page
         input[type=text]:focus { border-color: #444; }
       </style>
     </head>
-    <body>
+    <body hx-ext="mruby-router">
       <h1>HTMX x MRUBY</h1>
       <div class="grid">
 
@@ -82,22 +158,22 @@ def render_page
           <div class="counter-display">#{render_count}</div>
           <div class="btn-row">
             <button class="primary"
-                    hx-post="/counter/increment"
-                    hx-target="#count"
-                    hx-swap="outerHTML">+ INC</button>
-            <button hx-post="/counter/reset"
-                    hx-target="#count"
-                    hx-swap="outerHTML">RESET</button>
+                    rb-post="/counter/increment"
+                    rb-target="#count"
+                    rb-swap="outerHTML">+ INC</button>
+            <button rb-post="/counter/reset"
+                    rb-target="#count"
+                    rb-swap="outerHTML">RESET</button>
           </div>
         </div>
 
         <div class="card">
           <h2>TODOS</h2>
           #{render_todos}
-          <form hx-post="/todos"
-                hx-target="#todo-list"
-                hx-swap="outerHTML"
-                hx-on::after-request="this.reset()">
+          <form rb-post="/todos"
+                rb-target="#todo-list"
+                rb-swap="outerHTML"
+                rb-reset>
             <div class="add-row">
               <input type="text" name="item" placeholder="add item..." autocomplete="off">
               <button class="primary" type="submit">ADD</button>
@@ -126,74 +202,6 @@ def route(method, path, params)
     "<p style='color:crimson'>404 - #{method} #{path}</p>"
   end
 end
-
-# Fixes new URL(path, "about:blank") throwing in WebKit.
-# Everything else in the browser stack stays untouched.
-URL_PATCH = <<~'JS'
-  <script>
-    (function() {
-      var Native = window.URL;
-      function PatchedURL(url, base) {
-        if (!base || base === 'about:blank' || base === 'null') base = 'http://localhost/';
-        return new Native(url, base);
-      }
-      PatchedURL.prototype       = Native.prototype;
-      PatchedURL.createObjectURL = Native.createObjectURL.bind(Native);
-      PatchedURL.revokeObjectURL = Native.revokeObjectURL.bind(Native);
-      if (Native.canParse) PatchedURL.canParse = Native.canParse.bind(Native);
-      window.URL = PatchedURL;
-    })();
-  </script>
-JS
-
-# Runs after htmx loads. Uses htmx's own event system instead of faking XHR:
-#   1. selfRequestsOnly off  — origin is "null" on about:blank pages
-#   2. htmx:beforeRequest    — cancel the real request
-#   3. grab method/path/params from evt.detail (htmx already parsed them)
-#   4. call Ruby, then swap via htmx.find + outerHTML/innerHTML
-#   5. htmx.process() re-registers htmx on any new elements
-#   6. htmx.trigger afterRequest so hx-on::after-request handlers fire
-HTMX_HOOK = <<~'JS'
-  <script>
-    htmx.config.selfRequestsOnly = false;
-
-    document.addEventListener('htmx:beforeRequest', function(evt) {
-      evt.preventDefault();
-
-      var elt    = evt.detail.elt;
-      var target = evt.detail.target;
-      var method = (evt.detail.requestConfig.verb || 'get').toUpperCase();
-      var path   = evt.detail.pathInfo && evt.detail.pathInfo.requestPath;
-      var params = evt.detail.requestConfig.parameters || {};
-
-      if (!path) return;
-
-      // Strip the dummy base, keep only the path
-      try { path = new URL(path).pathname; } catch(e) {}
-
-      window.htmx_route(method, path, params).then(function(html) {
-        var swap = elt.getAttribute('hx-swap') ||
-                   htmx.config.defaultSwapStyle || 'innerHTML';
-
-        if (swap === 'outerHTML') {
-          target.outerHTML = html;
-        } else {
-          target.innerHTML = html;
-        }
-
-        // Re-register htmx on any newly inserted elements
-        htmx.process(document.body);
-
-        // Fire afterRequest so hx-on::after-request="this.reset()" etc. work
-        htmx.trigger(elt, 'htmx:afterRequest', { successful: true, failed: false });
-
-      }).catch(function(err) {
-        console.error('htmx_route error:', err, err && err.message);
-        htmx.trigger(elt, 'htmx:afterRequest', { successful: false, failed: true });
-      });
-    });
-  </script>
-JS
 
 Webview.open(title: "htmx x mruby", size: [800, 600], debug: true) do |w|
   w.bind(:htmx_route) { |method, path, params| route(method, path, params) }
