@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <ProjectGuid>{6E7DFB1B-2DA5-CFFC-3098-B16C5EE1084E}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\mrb_webview.cc" />
+    <ClCompile Include="vendor\webview\core\src\webview.cc" />
+    <ClCompile Include="vendor\webview\core\tests\src\functional_tests.cc" />
+    <ClCompile Include="vendor\webview\core\tests\src\unit_tests.cc" />
+    <ClCompile Include="vendor\webview\examples\basic.c" />
+    <ClCompile Include="vendor\webview\examples\basic.cc" />
+    <ClCompile Include="vendor\webview\examples\bind.c" />
+    <ClCompile Include="vendor\webview\examples\bind.cc" />
+    <ClCompile Include="vendor\webview\scripts\amalgamate\test\main.c" />
+    <ClCompile Include="vendor\webview\scripts\amalgamate\test\main.cc" />
+    <ClCompile Include="vendor\webview\scripts\amalgamate\test\webview.cc" />
+    <ClCompile Include="vendor\webview\test_driver\src\test_driver.cc" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="vendor\webview\compatibility\mingw\include\EventToken.h" />
+    <ClInclude Include="vendor\webview\core\include\webview.h" />
+    <ClInclude Include="vendor\webview\core\include\webview\api.h" />
+    <ClInclude Include="vendor\webview\core\include\webview\backends.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\c_api_impl.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\backends\cocoa_webkit.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\backends\gtk_webkitgtk.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\backends\win32_edge.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\basic_result.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\engine_base.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\exceptions.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\json.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\native_library.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\optional.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\cocoa.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSApplication.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSBundle.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSEvent.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSInvocation.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSMethodSignature.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSNotification.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSNumber.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSObject.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSOpenPanel.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSPoint.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSRect.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSSavePanel.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSSize.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSString.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSURL.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSURLRequest.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSValue.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSView.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSWindow.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\types.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\objc\autoreleasepool.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\objc\Class.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\objc\invoke.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\objc\memory.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\objc\objc.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\webkit.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\WKOpenPanelParameters.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\WKScriptMessage.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\WKUserContentController.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\WKUserScript.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\WKWebView.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\WKWebViewConfiguration.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\linux\gtk\compat.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\linux\webkitgtk\compat.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\linux\webkitgtk\dmabuf.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\com_init_wrapper.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\dpi.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\dwmapi.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\iid.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\ntdll.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\reg_key.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\shcore.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\theme.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\user32.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\version.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\webview2\loader.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\user_script.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\detail\utility\string.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\errors.h" />
+    <ClInclude Include="vendor\webview\core\include\webview\errors.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\json_deprecated.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\macros.h" />
+    <ClInclude Include="vendor\webview\core\include\webview\types.h" />
+    <ClInclude Include="vendor\webview\core\include\webview\types.hh" />
+    <ClInclude Include="vendor\webview\core\include\webview\version.h" />
+    <ClInclude Include="vendor\webview\core\include\webview\webview.h" />
+    <ClInclude Include="vendor\webview\test_driver\include\webview\test_driver.hh" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="vendor\webview\examples\resources\windows\resources.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="packages\Microsoft.Web.WebView2.1.0.3912.50\build\native\Microsoft.Web.WebView2.targets" Condition="Exists('packages\Microsoft.Web.WebView2.1.0.3912.50\build\native\Microsoft.Web.WebView2.targets')" />
+  </ImportGroup>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>Dieses Projekt verweist auf mindestens ein NuGet-Paket, das auf diesem Computer fehlt. Verwenden Sie die Wiederherstellung von NuGet-Paketen, um die fehlende(n) Datei(en) herunterzuladen. Weitere Informationen finden Sie unter "http://go.microsoft.com/fwlink/?LinkID=322105". Die fehlende Datei ist "{0}".</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('packages\Microsoft.Web.WebView2.1.0.3912.50\build\native\Microsoft.Web.WebView2.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\Microsoft.Web.WebView2.1.0.3912.50\build\native\Microsoft.Web.WebView2.targets'))" />
+  </Target>
+</Project>

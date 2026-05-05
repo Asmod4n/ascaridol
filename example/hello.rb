@@ -6,7 +6,15 @@
 html = <<~HTML
   <!doctype html>
   <html>
-    <head><meta charset="utf-8"><title>mruby-webview</title></head>
+    <head><meta charset="utf-8"><title>mruby-webview</title>
+    <meta name="color-scheme" content="light dark">
+<style>
+  @media (prefers-color-scheme: dark) {
+    body { background: #1e1e1e; color: #e0e0e0; }
+    h1 { color: #fff; }
+  }
+</style>
+    </head>
     <body style="padding: 2em;">
       <h1>Hello from mruby!</h1>
       <p>Click the button to call into Ruby.</p>
@@ -25,12 +33,7 @@ s = TCPServer.new 1600
 s.listen 1000
 
 Webview.open(title: 'mruby-webview demo', size: [640, 480], debug: true) do |w|
-  w.add_native_event(s) do |fd, what|
-    client = fd.accept
-    client.write "hello"
-    client.close
-    true
-  end
+
 
   w.bind(:greet) do |name|
     "Hello, #{name}! (replied at #{Time.now rescue 'now'})"

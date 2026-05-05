@@ -1,5 +1,5 @@
 MRuby::Build.new do |conf|
-    toolchain :gcc
+    toolchain :visualcpp
     def for_windows?
         ('A'..'Z').to_a.any? { |vol| Dir.exist?("#{vol}:") }
     end

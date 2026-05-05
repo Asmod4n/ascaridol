@@ -1,0 +1,278 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\mrb_webview.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vendor\webview\core\src\webview.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vendor\webview\core\tests\src\functional_tests.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vendor\webview\core\tests\src\unit_tests.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vendor\webview\examples\basic.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vendor\webview\examples\bind.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vendor\webview\examples\basic.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vendor\webview\examples\bind.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vendor\webview\scripts\amalgamate\test\main.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vendor\webview\scripts\amalgamate\test\webview.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vendor\webview\scripts\amalgamate\test\main.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vendor\webview\test_driver\src\test_driver.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="vendor\webview\compatibility\mingw\include\EventToken.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\api.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\errors.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\macros.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\types.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\version.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\webview.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\backends.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\c_api_impl.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\errors.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\json_deprecated.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\types.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\basic_result.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\engine_base.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\exceptions.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\json.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\native_library.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\optional.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\user_script.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\backends\cocoa_webkit.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\backends\gtk_webkitgtk.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\backends\win32_edge.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\cocoa.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSApplication.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSBundle.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSEvent.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSInvocation.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSMethodSignature.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSNotification.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSNumber.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSObject.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSOpenPanel.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSPoint.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSRect.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSSavePanel.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSSize.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSString.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSURL.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSURLRequest.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSValue.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSView.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\NSWindow.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\cocoa\types.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\objc\autoreleasepool.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\objc\Class.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\objc\invoke.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\objc\memory.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\objc\objc.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\webkit.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\WKOpenPanelParameters.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\WKScriptMessage.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\WKUserContentController.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\WKUserScript.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\WKWebView.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\darwin\webkit\WKWebViewConfiguration.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\linux\gtk\compat.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\linux\webkitgtk\compat.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\linux\webkitgtk\dmabuf.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\com_init_wrapper.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\dpi.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\dwmapi.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\iid.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\ntdll.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\reg_key.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\shcore.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\theme.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\user32.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\version.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\platform\windows\webview2\loader.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\core\include\webview\detail\utility\string.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vendor\webview\test_driver\include\webview\test_driver.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="vendor\webview\examples\resources\windows\resources.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+</Project>

@@ -6,6 +6,7 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
 
   spec.add_dependency 'mruby-fast-json'
   spec.add_dependency 'mruby-c-ext-helpers'
+  spec.add_dependency 'mruby-cbor'
   spec.add_dependency 'mruby-string-ext', core: 'mruby-string-ext'
   spec.add_dependency 'mruby-hash-ext',   core: 'mruby-hash-ext'
   spec.add_dependency 'mruby-symbol-ext', core: 'mruby-symbol-ext'
@@ -66,6 +67,16 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
 
   if is_windows
     spec.linker.libraries.concat(%w[advapi32 ole32 shell32 shlwapi user32 version])
+      pkg_dir = Dir.glob(File.join(spec.dir, 'packages', 'Microsoft.Web.WebView2.*')).max
+      pkg_dir ||= ENV['WEBVIEW2_SDK']
+      abort "[mruby-webview] WebView2 SDK not found — run: nuget install Microsoft.Web.WebView2 -OutputDirectory packages" unless pkg_dir
+
+      sdk_inc = File.join(pkg_dir, 'build', 'native', 'include')
+      abort "[mruby-webview] WebView2.h not found at #{sdk_inc}" unless File.exist?(File.join(sdk_inc, 'WebView2.h'))
+
+      spec.cc.include_paths  << sdk_inc
+      spec.cxx.include_paths << sdk_inc
+      spec.cxx.flags << '/std:c++20'
   elsif is_darwin
     spec.linker.flags_after_libraries.concat(%w[-framework WebKit -framework Cocoa])
     spec.linker.libraries << 'c++'

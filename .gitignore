@@ -62,3 +62,10 @@ build-iPhoneSimulator/
 /mruby/
 build_config.rb.lock
 compile_commands.json
+
+# Visual Studio
+.vs/
+*.vcxproj.user
+
+# NuGet packages directory (restored from packages.config)
+/packages/
