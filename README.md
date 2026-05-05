@@ -33,6 +33,10 @@ Webview.open(title: 'Demo', size: [640, 480]) do |w|
 end
 ```
 
+## Screenshots
+
+![Screenshot](htmx_example.png)
+
 ## API
 
 ```ruby
