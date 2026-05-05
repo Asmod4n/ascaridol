@@ -21,9 +21,17 @@ html = <<~HTML
     </body>
   </html>
 HTML
-
+s = TCPServer.new 1600
+s.listen 1000
 
 Webview.open(title: 'mruby-webview demo', size: [640, 480], debug: true) do |w|
+  w.add_native_event(s) do |fd, what|
+    client = fd.accept
+    client.write "hello"
+    client.close
+    true
+  end
+
   w.bind(:greet) do |name|
     "Hello, #{name}! (replied at #{Time.now rescue 'now'})"
   end
