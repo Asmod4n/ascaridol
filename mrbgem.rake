@@ -8,6 +8,7 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
   spec.add_dependency 'mruby-c-ext-helpers'
   spec.add_dependency 'mruby-cbor'
   spec.add_dependency 'mruby-lmdb'
+  spec.add_dependency 'mruby-uri-parser'
   spec.add_dependency 'mruby-string-ext', core: 'mruby-string-ext'
   spec.add_dependency 'mruby-hash-ext',   core: 'mruby-hash-ext'
   spec.add_dependency 'mruby-symbol-ext', core: 'mruby-symbol-ext'
@@ -77,7 +78,6 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
 
       spec.cc.include_paths  << sdk_inc
       spec.cxx.include_paths << sdk_inc
-      spec.cxx.flags << '/std:c++20'
   elsif is_darwin
     spec.linker.flags_after_libraries.concat(%w[-framework WebKit -framework Cocoa])
     spec.linker.libraries << 'c++'
@@ -109,6 +109,11 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
     spec.linker.libraries << 'pthread'
   end
 
-  # mruby-c-ext-helpers needs C++17; webview's C++ core needs C++14+.
-  spec.cxx.flags << '-std=c++17' unless spec.cxx.flags.flatten.any? { |f| f =~ /-std=c\+\+/ }
+  unless spec.cxx.flags.flatten.any? { |f| f =~ /-std=c\+\+/ }
+    if is_windows
+      spec.cxx.flags << '/std:c++20'
+    else
+      spec.cxx.flags << '-std=c++20'
+    end
+  end
 end

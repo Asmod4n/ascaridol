@@ -13,8 +13,5 @@ MRuby::Build.new do |conf|
     conf.cxx.defines << 'MRB_UTF8_STRING' << 'MRB_HIGH_PROFILE'
     conf.enable_test
     conf.gembox 'default'
-    conf.cc.flags << '-O3' << '-march=native' << '-g -fno-omit-frame-pointer'
-    conf.cxx.flags << '-O3' << '-march=native' << '-g -fno-omit-frame-pointer'
-
     conf.gem File.expand_path(File.dirname(__FILE__))
 end

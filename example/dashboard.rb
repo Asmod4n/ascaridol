@@ -81,77 +81,6 @@ end
 
 # ---- htmx router ----------------------------------------------------------
 
-MRUBY_ROUTER_EXT = <<~'JS'
-  <script>
-    (function () {
-      var SEL = '[rb-get],[rb-post],[rb-put],[rb-patch],[rb-delete]';
-      var VERBS = ['get', 'post', 'put', 'patch', 'delete'];
-
-      function methodAndPath(elt) {
-        for (var i = 0; i < VERBS.length; i++) {
-          if (elt.hasAttribute('rb-' + VERBS[i])) {
-            return { method: VERBS[i].toUpperCase(),
-                     path: elt.getAttribute('rb-' + VERBS[i]) };
-          }
-        }
-      }
-
-      function dispatch(elt, e) {
-        if (e) e.preventDefault();
-        var mp = methodAndPath(elt); if (!mp) return;
-
-        var params = {};
-        var raw = elt.getAttribute('rb-vals');
-        if (raw) try { Object.assign(params, JSON.parse(raw)); } catch (_) {}
-        if (elt.tagName === 'FORM') {
-          new FormData(elt).forEach(function (v, k) { params[k] = v; });
-        }
-
-        var targetSel = elt.getAttribute('rb-target');
-        var target    = targetSel ? document.querySelector(targetSel) : elt;
-        var swap      = elt.getAttribute('rb-swap') || 'innerHTML';
-        var indSel    = elt.getAttribute('rb-indicator');
-        var ind       = indSel ? document.querySelector(indSel) : null;
-
-        if (ind) ind.classList.add('busy');
-        elt.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
-
-        window.htmx_route(mp.method, mp.path, params).then(function (html) {
-          if (swap === 'outerHTML') target.outerHTML = html;
-          else target.innerHTML = html;
-        }).catch(function (err) {
-          target.innerHTML = "<div class='error'>" +
-            (err && err.message ? err.message : String(err)) + "</div>";
-        }).finally(function () {
-          if (ind) ind.classList.remove('busy');
-          elt.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
-        });
-      }
-
-      function wire(root) {
-        root.querySelectorAll(SEL).forEach(function (elt) {
-          if (elt.__rb_wired) return;
-          elt.__rb_wired = true;
-          var trig = (elt.getAttribute('rb-trigger') ||
-                     (elt.tagName === 'FORM' ? 'submit' : 'click')).split(/\s*,\s*/);
-          trig.forEach(function (t) {
-            var ev = t.trim();
-            if (ev === 'load') { dispatch(elt); return; }
-            elt.addEventListener(ev, function (e) { dispatch(elt, e); });
-          });
-        });
-      }
-
-      document.addEventListener('DOMContentLoaded', function () { wire(document); });
-      new MutationObserver(function (muts) {
-        muts.forEach(function (m) { m.addedNodes.forEach(function (n) {
-          if (n.nodeType === 1) wire(n);
-        }); });
-      }).observe(document.documentElement, { childList: true, subtree: true });
-    })();
-  </script>
-JS
-
 CSS = <<~'CSS'
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Courier New', monospace; background: #0f0f0f; color: #e8e8e8; padding: 1.5rem; }
@@ -347,7 +276,7 @@ end
 def render_page(w_bindings)
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>dashboard</title>
-    #{MRUBY_ROUTER_EXT}<style>#{CSS}</style></head>
+    #{Webview::MRUBY_ROUTER_EXT}<style>#{CSS}</style></head>
     <body><h1>MRUBY-WEBVIEW DASHBOARD</h1>
     <div class="grid">
       #{render_webview_panel}

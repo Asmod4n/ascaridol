@@ -82,85 +82,6 @@ $store = HAS_DEPS ? NoteStore.new(DB_DIR) : nil
 
 # ---- htmx router ----------------------------------------------------------
 
-MRUBY_ROUTER_EXT = <<~'JS'
-  <script>
-    (function () {
-      var SEL = '[rb-get],[rb-post],[rb-put],[rb-patch],[rb-delete]';
-      var VERBS = ['get', 'post', 'put', 'patch', 'delete'];
-      function methodAndPath(elt) {
-        for (var i = 0; i < VERBS.length; i++) {
-          if (elt.hasAttribute('rb-' + VERBS[i])) {
-            return { method: VERBS[i].toUpperCase(),
-                     path: elt.getAttribute('rb-' + VERBS[i]) };
-          }
-        }
-      }
-      function dispatch(elt, e) {
-        if (e) e.preventDefault();
-        var mp = methodAndPath(elt); if (!mp) return;
-        var params = {};
-        var raw = elt.getAttribute('rb-vals');
-        if (raw) try { Object.assign(params, JSON.parse(raw)); } catch (_) {}
-        if (elt.tagName === 'FORM') {
-          new FormData(elt).forEach(function (v, k) { params[k] = v; });
-        } else if (elt.name) {
-          params[elt.name] = elt.value;
-        }
-        var targetSel = elt.getAttribute('rb-target');
-        var target    = targetSel ? document.querySelector(targetSel) : elt;
-        var swap      = elt.getAttribute('rb-swap') || 'innerHTML';
-        if (!target) return;
-        window.htmx_route(mp.method, mp.path, params).then(function (html) {
-          if (swap === 'outerHTML') target.outerHTML = html;
-          else if (swap === 'beforeend') target.insertAdjacentHTML('beforeend', html);
-          else target.innerHTML = html;
-        }).catch(function (err) {
-          console.error('[mruby-router]', err && err.message || err);
-        });
-      }
-      function parseTriggers(raw, defaultEv) {
-        return (raw || defaultEv).split(/\s*,\s*/).map(function (t) {
-          var parts = t.trim().split(/\s+/);
-          var ev = parts.shift();
-          var delay = 0;
-          parts.forEach(function (p) {
-            var m = /^delay:(\d+)(ms|s)?$/.exec(p);
-            if (m) delay = parseInt(m[1], 10) * (m[2] === 's' ? 1000 : 1);
-          });
-          return { ev: ev, delay: delay };
-        });
-      }
-      function wire(root) {
-        root.querySelectorAll(SEL).forEach(function (elt) {
-          if (elt.__rb_wired) return;
-          elt.__rb_wired = true;
-          var defaultEv = elt.tagName === 'FORM' ? 'submit' :
-                          (elt.tagName === 'INPUT' || elt.tagName === 'TEXTAREA') ? 'input' :
-                          'click';
-          parseTriggers(elt.getAttribute('rb-trigger'), defaultEv).forEach(function (t) {
-            if (t.ev === 'changed') return;     // bare "changed" is a modifier in htmx
-            var timer = null;
-            elt.addEventListener(t.ev, function (e) {
-              if (t.delay) {
-                clearTimeout(timer);
-                timer = setTimeout(function () { dispatch(elt, e); }, t.delay);
-              } else {
-                dispatch(elt, e);
-              }
-            });
-          });
-        });
-      }
-      document.addEventListener('DOMContentLoaded', function () { wire(document); });
-      new MutationObserver(function (muts) {
-        muts.forEach(function (m) { m.addedNodes.forEach(function (n) {
-          if (n.nodeType === 1) wire(n);
-        }); });
-      }).observe(document.documentElement, { childList: true, subtree: true });
-    })();
-  </script>
-JS
-
 CSS = <<~'CSS'
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
@@ -289,7 +210,7 @@ def render_page
     "letter-spacing:.15em'>mruby-lmdb / mruby-cbor not loaded — running in read-only demo mode</div>"
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>notes</title>
-    #{MRUBY_ROUTER_EXT}<style>#{CSS}</style></head>
+    #{Webview::MRUBY_ROUTER_EXT}<style>#{CSS}</style></head>
     <body>
     #{banner}
     <header>
