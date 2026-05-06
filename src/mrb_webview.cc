@@ -9,6 +9,12 @@
  *
  * Copyright (c) 2026 Hendrik Beskow. MIT License.
  */
+#ifdef _WIN32
+#  define WIN32_LEAN_AND_MEAN
+#  define NOMINMAX
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#endif
 
 #include <mruby.h>
 #include <mruby/data.h>
@@ -744,6 +750,264 @@ mrb_webview_remove_native_event(mrb_state *mrb, mrb_value self)
 }
 #endif
 
+#ifdef WEBVIEW_EDGE
+
+#define MRB_WEBVIEW_WM_FD (WM_APP + 1)
+static const wchar_t MRB_WEBVIEW_WND_CLASS[] = L"mruby_webview_fd_dispatcher";
+
+struct mrb_webview_fd_ud {
+    mrb_state* mrb;
+    mrb_value  wv;
+    mrb_value  fd;
+    mrb_value  blk;
+    int        sock = -1;
+    HWND       hwnd = nullptr;
+
+    ~mrb_webview_fd_ud() {
+        /* Best-effort: if remove_native_event / destroy didn't run for some
+         * reason (e.g. raw GC of a stray _FDUD), pull the WSAAsyncSelect
+         * registration so winsock doesn't keep posting messages to a window
+         * that's about to lose its userdata. */
+        if (sock != -1 && hwnd && IsWindow(hwnd)) {
+            WSAAsyncSelect((SOCKET)sock, hwnd, 0, 0);
+        }
+    }
+};
+
+MRB_CPP_DEFINE_TYPE(mrb_webview_fd_ud, Webview_Userdata);
+
+static mrb_value
+mrb_webview_userdata_init(mrb_state* mrb, mrb_value self) {
+    mrb_value wv, fd, blk;
+    mrb_get_args(mrb, "ooo", &wv, &fd, &blk);
+    mrb_iv_set(mrb, self, MRB_SYM(wv), wv);
+    mrb_iv_set(mrb, self, MRB_SYM(fd), fd);
+    mrb_iv_set(mrb, self, MRB_SYM(blk), blk);
+
+    mrb_cpp_new<mrb_webview_fd_ud>(mrb, self);
+    mrb_webview_fd_ud* ud = mrb_cpp_get<mrb_webview_fd_ud>(mrb, self);
+    ud->mrb = mrb;
+    ud->wv = wv;
+    ud->fd = fd;
+    ud->blk = blk;
+    return self;
+}
+
+/* Per-Webview context bound to the hidden window's GWLP_USERDATA. Wrapped
+ * as a CData so its lifetime sits on mruby's GC ledger instead of being
+ * hand-balanced new/delete; the Webview self holds it in a hidden iv. */
+struct mrb_webview_wnd_ctx {
+    mrb_state* mrb;
+    mrb_value  self;
+};
+
+MRB_CPP_DEFINE_TYPE(mrb_webview_wnd_ctx, Webview_WndCtx);
+
+static mrb_value
+mrb_webview_wnd_ctx_init(mrb_state* mrb, mrb_value self) {
+    mrb_value wv;
+    mrb_get_args(mrb, "o", &wv);
+    mrb_iv_set(mrb, self, MRB_SYM(wv), wv);
+
+    mrb_cpp_new<mrb_webview_wnd_ctx>(mrb, self);
+    mrb_webview_wnd_ctx* ctx = mrb_cpp_get<mrb_webview_wnd_ctx>(mrb, self);
+    ctx->mrb = mrb;
+    ctx->self = wv;
+    return self;
+}
+
+/* socket(int) -> fd_obj, stored as a hidden iv on the Webview so the keys
+ * stay GC-rooted. WSAAsyncSelect notifications carry only the SOCKET, not
+ * the Ruby IO it came from, so we look the IO back up here. */
+static mrb_value
+sockmap_hash(mrb_state* mrb, mrb_value self) {
+    mrb_value h = mrb_iv_get(mrb, self, MRB_SYM(_native_event_sockmap));
+    if (!mrb_hash_p(h)) {
+        h = mrb_hash_new(mrb);
+        mrb_iv_set(mrb, self, MRB_SYM(_native_event_sockmap), h);
+    }
+    return h;
+}
+
+static LRESULT CALLBACK
+mrb_webview_fd_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg != MRB_WEBVIEW_WM_FD) {
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+    mrb_webview_wnd_ctx* ctx = reinterpret_cast<mrb_webview_wnd_ctx*>(
+        GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (!ctx) return 0;
+    mrb_state* mrb = ctx->mrb;
+    mrb_value  self = ctx->self;
+
+    int sock = (int)wParam;
+    int err = WSAGETSELECTERROR(lParam);
+    int evt = WSAGETSELECTEVENT(lParam);
+
+    mrb_int ai = mrb_gc_arena_save(mrb);
+
+    mrb_value smap = sockmap_hash(mrb, self);
+    mrb_value sk_v = mrb_int_value(mrb, sock);
+    mrb_value fd_obj = mrb_hash_fetch(mrb, smap, sk_v, mrb_undef_value());
+    if (mrb_undef_p(fd_obj)) { mrb_gc_arena_restore(mrb, ai); return 0; }
+
+    mrb_value fds_hash = FDS_HASH(mrb, self);
+    mrb_value ud_obj = mrb_hash_fetch(mrb, fds_hash, fd_obj, mrb_undef_value());
+    if (mrb_undef_p(ud_obj)) { mrb_gc_arena_restore(mrb, ai); return 0; }
+
+    mrb_webview_fd_ud* ud = mrb_cpp_get<mrb_webview_fd_ud>(mrb, ud_obj);
+    if (!ud) { mrb_gc_arena_restore(mrb, ai); return 0; }
+
+    /* Yield (fd, evt). evt is the WSA event mask (FD_READ | FD_ACCEPT | ...);
+     * blocks that just check truthiness for "ready" stay portable across
+     * GTK / Cocoa / Edge backends. */
+    const mrb_value argv[] = { ud->fd, mrb_int_value(mrb, evt) };
+    mrb_bool cont = mrb_test(mrb_yield_argv(mrb, ud->blk, 2, argv));
+
+    if (!cont || (evt & FD_CLOSE) || err != 0) {
+        if (ud->sock != -1) {
+            WSAAsyncSelect((SOCKET)ud->sock, hwnd, 0, 0);
+            mrb_hash_delete_key(mrb, smap, sk_v);
+            ud->sock = -1;
+        }
+        mrb_hash_delete_key(mrb, fds_hash, fd_obj);
+    }
+
+    mrb_gc_arena_restore(mrb, ai);
+    return 0;
+}
+
+static HWND
+mrb_webview_get_or_create_wnd(mrb_state* mrb, mrb_value self) {
+    mrb_value cached = mrb_iv_get(mrb, self, MRB_SYM(_native_event_hwnd));
+    if (mrb_cptr_p(cached)) return reinterpret_cast<HWND>(mrb_cptr(cached));
+
+    HINSTANCE hinst = GetModuleHandleW(nullptr);
+
+    WNDCLASSEXW wc = {};
+    if (!GetClassInfoExW(hinst, MRB_WEBVIEW_WND_CLASS, &wc)) {
+        wc = {};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = mrb_webview_fd_wnd_proc;
+        wc.hInstance = hinst;
+        wc.lpszClassName = MRB_WEBVIEW_WND_CLASS;
+        if (!RegisterClassExW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            mrb_raisef(mrb, E_RUNTIME_ERROR,
+                "RegisterClassEx failed: %d", (mrb_int)GetLastError());
+        }
+    }
+
+    HWND hwnd = CreateWindowExW(0, MRB_WEBVIEW_WND_CLASS, L"",
+        0, 0, 0, 0, 0,
+        HWND_MESSAGE, nullptr, hinst, nullptr);
+    if (!hwnd) {
+        mrb_raisef(mrb, E_RUNTIME_ERROR,
+            "CreateWindowEx (HWND_MESSAGE) failed: %d",
+            (mrb_int)GetLastError());
+    }
+
+    /* Allocate the ctx as a CData; root it on self via a hidden iv so GC
+     * keeps it alive for the same span as the HWND. */
+    const mrb_value cargv[] = { self };
+    mrb_value ctx_obj = mrb_obj_new(mrb,
+        mrb_class_get_under_id(mrb, mrb_class(mrb, self), MRB_SYM(_WndCtx)),
+        1, cargv);
+    mrb_iv_set(mrb, self, MRB_SYM(_native_event_wnd_ctx), ctx_obj);
+
+    mrb_webview_wnd_ctx* ctx = mrb_cpp_get<mrb_webview_wnd_ctx>(mrb, ctx_obj);
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(ctx));
+
+    mrb_iv_set(mrb, self, MRB_SYM(_native_event_hwnd), mrb_cptr_value(mrb, hwnd));
+    return hwnd;
+}
+
+static void
+mrb_webview_destroy_wnd(mrb_state* mrb, mrb_value self) {
+    mrb_value cached = mrb_iv_get(mrb, self, MRB_SYM(_native_event_hwnd));
+    if (!mrb_cptr_p(cached)) return;
+    HWND hwnd = reinterpret_cast<HWND>(mrb_cptr(cached));
+
+    /* Sever the WndProc → ctx link before tearing down the window so any
+     * stragglers in the message queue can't deref a half-released ctx. */
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+    DestroyWindow(hwnd);
+
+    mrb_iv_remove(mrb, self, MRB_SYM(_native_event_hwnd));
+    mrb_iv_remove(mrb, self, MRB_SYM(_native_event_wnd_ctx));
+}
+
+static mrb_value
+mrb_webview_add_native_event(mrb_state* mrb, mrb_value self) {
+    mrb_value fd_obj, blk = mrb_nil_value();
+    mrb_get_args(mrb, "o&", &fd_obj, &blk);
+    if (mrb_nil_p(blk))   mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
+    if (!mrb_proc_p(blk)) mrb_raise(mrb, E_TYPE_ERROR, "not a block");
+
+    int fd = (int)mrb_integer(
+        mrb_type_convert(mrb, fd_obj, MRB_TT_INTEGER, MRB_SYM(fileno)));
+
+    /* WSAAsyncSelect only accepts winsock SOCKETs — generic file/pipe/
+     * console HANDLEs need overlapped I/O or RegisterWaitForSingleObject,
+     * neither of which we want here. Reject early with a useful error. */
+    int sotype = 0; int solen = sizeof(sotype);
+    if (getsockopt((SOCKET)fd, SOL_SOCKET, SO_TYPE,
+        reinterpret_cast<char*>(&sotype), &solen) == SOCKET_ERROR) {
+        mrb_raisef(mrb, E_RUNTIME_ERROR,
+            "add_native_event on Windows requires a winsock SOCKET "
+            "(WSAGetLastError=%d)", (mrb_int)WSAGetLastError());
+    }
+
+    HWND hwnd = mrb_webview_get_or_create_wnd(mrb, self);
+
+    mrb_value fds_hash = FDS_HASH(mrb, self);
+    const mrb_value argv[] = { self, fd_obj, blk };
+    mrb_value ud_obj = mrb_obj_new(mrb,
+        mrb_class_get_under_id(mrb, mrb_class(mrb, self), MRB_SYM(_FDUD)),
+        3, argv);
+    mrb_hash_set(mrb, fds_hash, fd_obj, ud_obj);
+
+    mrb_webview_fd_ud* ud = mrb_cpp_get<mrb_webview_fd_ud>(mrb, ud_obj);
+    ud->sock = fd;
+    ud->hwnd = hwnd;
+
+    mrb_value smap = sockmap_hash(mrb, self);
+    mrb_hash_set(mrb, smap, mrb_int_value(mrb, fd), fd_obj);
+
+    /* WSAAsyncSelect implicitly puts the socket into non-blocking mode —
+     * which is the right mode for event-driven I/O anyway. */
+    long mask = FD_READ | FD_ACCEPT | FD_CLOSE | FD_OOB;
+    if (WSAAsyncSelect((SOCKET)fd, hwnd, MRB_WEBVIEW_WM_FD, mask) == SOCKET_ERROR) {
+        int err = WSAGetLastError();
+        mrb_hash_delete_key(mrb, smap, mrb_int_value(mrb, fd));
+        mrb_hash_delete_key(mrb, fds_hash, fd_obj);
+        mrb_raisef(mrb, E_RUNTIME_ERROR,
+            "WSAAsyncSelect failed: %d", (mrb_int)err);
+    }
+    return self;
+}
+
+static mrb_value
+mrb_webview_remove_native_event(mrb_state* mrb, mrb_value self) {
+    mrb_value fd_obj;
+    mrb_get_args(mrb, "o", &fd_obj);
+
+    mrb_value fds_hash = FDS_HASH(mrb, self);
+    mrb_value ud_obj = mrb_hash_fetch(mrb, fds_hash, fd_obj, mrb_undef_value());
+    if (mrb_undef_p(ud_obj)) return self;
+
+    mrb_webview_fd_ud* ud = mrb_cpp_get<mrb_webview_fd_ud>(mrb, ud_obj);
+    if (ud && ud->sock != -1 && ud->hwnd) {
+        WSAAsyncSelect((SOCKET)ud->sock, ud->hwnd, 0, 0);
+        mrb_value smap = sockmap_hash(mrb, self);
+        mrb_hash_delete_key(mrb, smap, mrb_int_value(mrb, ud->sock));
+        ud->sock = -1;
+    }
+    mrb_hash_delete_key(mrb, fds_hash, fd_obj);
+    return self;
+}
+
+#endif /* WEBVIEW_EDGE */
+
 /* ------------------------------------------------------------------------- */
 /* Init                                                                      */
 /* ------------------------------------------------------------------------- */
@@ -752,10 +1016,16 @@ void
 mrb_mruby_webview_gem_init(mrb_state *mrb) {
   struct RClass *cls = mrb_define_class_id(mrb, MRB_SYM(Webview), mrb->object_class);
   MRB_SET_INSTANCE_TT(cls, MRB_TT_CDATA);
-#if defined(WEBVIEW_GTK) || defined(WEBVIEW_COCOA)
+#if defined(WEBVIEW_GTK) || defined(WEBVIEW_COCOA) || defined(WEBVIEW_EDGE)
   struct RClass *ud_cls = mrb_define_class_under_id(mrb, cls, MRB_SYM(_FDUD), mrb->object_class);
   mrb_define_method_id(mrb, ud_cls, MRB_SYM(initialize), mrb_webview_userdata_init, MRB_ARGS_REQ(2));
   MRB_SET_INSTANCE_TT(ud_cls, MRB_TT_CDATA);
+#endif
+
+#ifdef WEBVIEW_EDGE
+  struct RClass* ctx_cls = mrb_define_class_under_id(mrb, cls, MRB_SYM(_WndCtx), mrb->object_class);
+  mrb_define_method_id(mrb, ctx_cls, MRB_SYM(initialize), mrb_webview_wnd_ctx_init, MRB_ARGS_REQ(1));
+  MRB_SET_INSTANCE_TT(ctx_cls, MRB_TT_CDATA);
 #endif
 
   struct RClass *err = mrb_define_class_under_id(mrb, cls, MRB_SYM(Error), E_RUNTIME_ERROR);
@@ -792,7 +1062,7 @@ mrb_mruby_webview_gem_init(mrb_state *mrb) {
   mrb_define_method_id(mrb, cls, MRB_SYM(return_result), mrb_webview_m_return,        MRB_ARGS_REQ(3));
 
   mrb_define_method_id(mrb, cls, MRB_SYM(bindings),      mrb_webview_m_bindings,      MRB_ARGS_NONE());
-#if defined(WEBVIEW_GTK) || defined(WEBVIEW_COCOA)
+#if defined(WEBVIEW_GTK) || defined(WEBVIEW_COCOA) || defined(WEBVIEW_EDGE)
   mrb_define_method_id(mrb, cls, MRB_SYM(add_native_event), mrb_webview_add_native_event, MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK());
   mrb_define_method_id(mrb, cls, MRB_SYM(remove_native_event), mrb_webview_remove_native_event, MRB_ARGS_REQ(1));
 #endif
