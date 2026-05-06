@@ -1,5 +1,5 @@
 MRuby::Build.new do |conf|
-    toolchain :gcc
+    toolchain :visualcpp
     def for_windows?
         ('A'..'Z').to_a.any? { |vol| Dir.exist?("#{vol}:") }
     end
@@ -8,7 +8,7 @@ MRuby::Build.new do |conf|
     end
     #conf.cxx.flags << '-fno-omit-frame-pointer' << '-g3' << '-ggdb3' << '-Og'
     #conf.cc.flags << '-fno-omit-frame-pointer' << '-g3' << '-ggdb3' << '-Og'
-    #conf.enable_debug
+    conf.enable_debug
     conf.cc.defines  << 'MRB_UTF8_STRING' << 'MRB_HIGH_PROFILE'
     conf.cxx.defines << 'MRB_UTF8_STRING' << 'MRB_HIGH_PROFILE'
     conf.enable_test

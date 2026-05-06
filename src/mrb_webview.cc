@@ -166,18 +166,20 @@ bind_dump_body(mrb_state *mrb, void *p) {
 }
 
 static std::string
-make_error_json_str(mrb_state *mrb, mrb_value name, mrb_value message) {
-  mrb_value h = mrb_hash_new_capa(mrb, 2);
-  mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(name)),    name);
-  mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(message)), message);
-  return to_std_string(mrb_json_dump(mrb, h));
+make_error_json_str(mrb_state* mrb, mrb_value name, mrb_value message,
+    mrb_value backtrace) {
+    mrb_value h = mrb_hash_new_capa(mrb, 3);
+    mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(name)), name);
+    mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(message)), message);
+    mrb_hash_set(mrb, h, mrb_symbol_value(MRB_SYM(backtrace)), mrb_array_p(backtrace) ? backtrace : mrb_ary_new(mrb));
+    return to_std_string(mrb_json_dump(mrb, h));
 }
 
 /* Runs synchronously on the UI thread (== the mruby thread): looks up the
  * Ruby block in the hidden `bindings` iv table via name_sym, parses the
  * JSON args, invokes the block, and resolves the JS-side promise via
  * wv->resolve. Exceptions from JSON parse / proc call / JSON dump get
- * mapped onto resolve(id, 1, "{name:, message:}"). */
+ * mapped onto resolve(id, 1, "{name:, message:, backtrace:}"). */
 static void
 invoke_bound_proc(mrb_state *mrb, mrb_value self, mrb_sym name_sym,
                   webview::webview *wv,
@@ -203,8 +205,9 @@ invoke_bound_proc(mrb_state *mrb, mrb_value self, mrb_sym name_sym,
   mrb_value parsed = mrb_protect_error(mrb, bind_parse_body, &step, &err);
   if (err) {
     mrb_value msg = mrb_funcall_id(mrb, parsed, MRB_SYM(message), 0);
+    mrb_value backtrace = mrb_funcall_id(mrb, parsed, MRB_SYM(backtrace), 0);
     wv->resolve(id, 1,
-      make_error_json_str(mrb, mrb_str_new_lit(mrb, "ParseError"), msg));
+      make_error_json_str(mrb, mrb_str_new_lit(mrb, "ParseError"), msg, backtrace));
     mrb_gc_arena_restore(mrb, ai);
     return;
   }
@@ -218,13 +221,14 @@ invoke_bound_proc(mrb_state *mrb, mrb_value self, mrb_sym name_sym,
   err = FALSE;
   mrb_value result = mrb_protect_error(mrb, bind_invoke_body, &step, &err);
   if (err) {
-    mrb_value msg  = mrb_funcall_id(mrb, result, MRB_SYM(message), 0);
-    mrb_value cls  = mrb_funcall_id(mrb, result, MRB_SYM(class), 0);
-    mrb_value name = mrb_funcall_id(mrb, cls, MRB_SYM(name), 0);
-    if (!mrb_string_p(name)) name = mrb_str_new_lit(mrb, "Error");
-    wv->resolve(id, 1, make_error_json_str(mrb, name, msg));
-    mrb_gc_arena_restore(mrb, ai);
-    return;
+      mrb_value msg = mrb_funcall_id(mrb, result, MRB_SYM(message), 0);
+      mrb_value cls = mrb_funcall_id(mrb, result, MRB_SYM(class), 0);
+      mrb_value name = mrb_funcall_id(mrb, cls, MRB_SYM(name), 0);
+      mrb_value backtrace = mrb_funcall_id(mrb, result, MRB_SYM(backtrace), 0);
+      if (!mrb_string_p(name)) name = mrb_str_new_lit(mrb, "Error");
+      wv->resolve(id, 1, make_error_json_str(mrb, name, msg, backtrace));
+      mrb_gc_arena_restore(mrb, ai);
+      return;
   }
   step.result = result;
 

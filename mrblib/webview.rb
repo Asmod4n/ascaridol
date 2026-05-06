@@ -70,23 +70,27 @@ class Webview
   # webview rejects promises with a plain {name:, message:} object when the
   # Ruby block raises. Promote it to a real Error so JS callers get a readable
   # stack and can use instanceof / .message normally.
-  def _install_error_shim(name)
-    js_name = name.to_s.inspect
-    init(<<~JS)
-      (function () {
-        var fn = window[#{js_name}];
-        if (typeof fn !== 'function') return;
-        window[#{js_name}] = function () {
-          return fn.apply(this, arguments).catch(function (e) {
-            if (e && typeof e === 'object' && typeof e.message === 'string') {
-              var err = new Error(e.message);
-              err.name = e.name || 'Error';
-              throw err;
+def _install_error_shim(name)
+  js_name = name.to_s.inspect
+  init(<<~JS)
+    (function () {
+      var fn = window[#{js_name}];
+      if (typeof fn !== 'function') return;
+      window[#{js_name}] = function () {
+        return fn.apply(this, arguments).catch(function (e) {
+          if (e && typeof e === 'object' && typeof e.message === 'string') {
+            var err = new Error(e.message);
+            err.name = typeof e.name === 'string' ? e.name : 'Error';
+            if (Array.isArray(e.backtrace) && e.backtrace.length > 0) {
+              err.stack = err.name + ': ' + err.message + '\\n' +
+                          e.backtrace.map(function(l) { return '    ' + l; }).join('\\n');
             }
-            throw e;
-          });
-        };
-      })();
-    JS
-  end
+            throw err;
+          }
+          throw e;
+        });
+      };
+    })();
+  JS
+end
 end

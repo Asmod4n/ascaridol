@@ -29,12 +29,8 @@ html = <<~HTML
     </body>
   </html>
 HTML
-s = TCPServer.new 1600
-s.listen 1000
 
 Webview.open(title: 'mruby-webview demo', size: [640, 480], debug: true) do |w|
-
-
   w.bind(:greet) do |name|
     "Hello, #{name}! (replied at #{Time.now rescue 'now'})"
   end

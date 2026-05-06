@@ -7,6 +7,7 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
   spec.add_dependency 'mruby-fast-json'
   spec.add_dependency 'mruby-c-ext-helpers'
   spec.add_dependency 'mruby-cbor'
+  spec.add_dependency 'mruby-lmdb'
   spec.add_dependency 'mruby-string-ext', core: 'mruby-string-ext'
   spec.add_dependency 'mruby-hash-ext',   core: 'mruby-hash-ext'
   spec.add_dependency 'mruby-symbol-ext', core: 'mruby-symbol-ext'
