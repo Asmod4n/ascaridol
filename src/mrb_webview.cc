@@ -656,25 +656,6 @@ struct mrb_webview_fd_ud {
 
 MRB_CPP_DEFINE_TYPE(mrb_webview_fd_ud, Webview_Userdata);
 
-static mrb_value
-mrb_webview_userdata_init(mrb_state *mrb, mrb_value self)
-{
-  mrb_value wv, fd, blk;
-  mrb_get_args(mrb, "ooo", &wv, &fd, &blk);
-
-  mrb_iv_set(mrb, self, MRB_SYM(wv),  wv);
-  mrb_iv_set(mrb, self, MRB_SYM(fd),  fd);
-  mrb_iv_set(mrb, self, MRB_SYM(blk), blk);
-
-  mrb_cpp_new<mrb_webview_fd_ud>(mrb, self);
-  mrb_webview_fd_ud *ud = mrb_cpp_get<mrb_webview_fd_ud>(mrb, self);
-  ud->mrb = mrb;
-  ud->wv  = wv;
-  ud->fd  = fd;
-  ud->blk = blk;
-  return self;
-}
-
 static void
 on_cf_fd_ready(CFFileDescriptorRef cf_fd, CFOptionFlags /*callbackTypes*/, void *info)
 {
@@ -776,22 +757,6 @@ struct mrb_webview_fd_ud {
 
 MRB_CPP_DEFINE_TYPE(mrb_webview_fd_ud, Webview_Userdata);
 
-static mrb_value
-mrb_webview_userdata_init(mrb_state* mrb, mrb_value self) {
-    mrb_value wv, fd, blk;
-    mrb_get_args(mrb, "ooo", &wv, &fd, &blk);
-    mrb_iv_set(mrb, self, MRB_SYM(wv), wv);
-    mrb_iv_set(mrb, self, MRB_SYM(fd), fd);
-    mrb_iv_set(mrb, self, MRB_SYM(blk), blk);
-
-    mrb_cpp_new<mrb_webview_fd_ud>(mrb, self);
-    mrb_webview_fd_ud* ud = mrb_cpp_get<mrb_webview_fd_ud>(mrb, self);
-    ud->mrb = mrb;
-    ud->wv = wv;
-    ud->fd = fd;
-    ud->blk = blk;
-    return self;
-}
 
 /* Per-Webview context bound to the hidden window's GWLP_USERDATA. Wrapped
  * as a CData so its lifetime sits on mruby's GC ledger instead of being
@@ -1008,6 +973,25 @@ mrb_webview_remove_native_event(mrb_state* mrb, mrb_value self) {
 
 #endif /* WEBVIEW_EDGE */
 
+static mrb_value
+mrb_webview_userdata_init(mrb_state *mrb, mrb_value self)
+{
+  mrb_value wv, fd, blk;
+  mrb_get_args(mrb, "ooo", &wv, &fd, &blk);
+
+  mrb_iv_set(mrb, self, MRB_SYM(wv),  wv);
+  mrb_iv_set(mrb, self, MRB_SYM(fd),  fd);
+  mrb_iv_set(mrb, self, MRB_SYM(blk), blk);
+
+  mrb_cpp_new<mrb_webview_fd_ud>(mrb, self);
+  mrb_webview_fd_ud *ud = mrb_cpp_get<mrb_webview_fd_ud>(mrb, self);
+  ud->mrb = mrb;
+  ud->wv  = wv;
+  ud->fd  = fd;
+  ud->blk = blk;
+  return self;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Init                                                                      */
 /* ------------------------------------------------------------------------- */
@@ -1016,11 +1000,9 @@ void
 mrb_mruby_webview_gem_init(mrb_state *mrb) {
   struct RClass *cls = mrb_define_class_id(mrb, MRB_SYM(Webview), mrb->object_class);
   MRB_SET_INSTANCE_TT(cls, MRB_TT_CDATA);
-#if defined(WEBVIEW_GTK) || defined(WEBVIEW_COCOA) || defined(WEBVIEW_EDGE)
   struct RClass *ud_cls = mrb_define_class_under_id(mrb, cls, MRB_SYM(_FDUD), mrb->object_class);
   mrb_define_method_id(mrb, ud_cls, MRB_SYM(initialize), mrb_webview_userdata_init, MRB_ARGS_REQ(2));
   MRB_SET_INSTANCE_TT(ud_cls, MRB_TT_CDATA);
-#endif
 
 #ifdef WEBVIEW_EDGE
   struct RClass* ctx_cls = mrb_define_class_under_id(mrb, cls, MRB_SYM(_WndCtx), mrb->object_class);
