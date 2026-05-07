@@ -38,7 +38,7 @@ Webview.open(title: 'mruby-webview demo', size: [640, 480], debug: true) do |w|
     loop do
       client = begin
         fd.accept
-      rescue => e
+      rescue Errno::EWOULDBLOCK
         nil
       end
       break unless client
