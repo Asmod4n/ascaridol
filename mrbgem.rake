@@ -9,12 +9,13 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
   spec.add_dependency 'mruby-cbor'
   spec.add_dependency 'mruby-lmdb'
   spec.add_dependency 'mruby-uri-parser'
+  spec.add_dependency 'mruby-mustache', github: 'Asmod4n/mruby-mustache', branch: 'main'
+  spec.add_dependency 'typedargs'
   spec.add_dependency 'mruby-string-ext', core: 'mruby-string-ext'
   spec.add_dependency 'mruby-hash-ext',   core: 'mruby-hash-ext'
   spec.add_dependency 'mruby-symbol-ext', core: 'mruby-symbol-ext'
   spec.add_dependency 'mruby-error',      core: 'mruby-error'
   spec.add_dependency 'mruby-proc-ext',   core: 'mruby-proc-ext'
-  spec.add_dependency 'mruby-metaprog',   core: 'mruby-metaprog'
 
   # mruby-fast-json requires UTF-8 string support.
   spec.cc.defines  << 'MRB_UTF8_STRING'
@@ -116,4 +117,6 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
       spec.cxx.flags << '-std=c++20'
     end
   end
+
+  spec.bins = %w(hypha.mrb)
 end

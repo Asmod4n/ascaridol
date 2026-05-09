@@ -12,6 +12,7 @@
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
 #  define NOMINMAX
+#  define _WINSOCK_DEPRECATED_NO_WARNINGS    // WSAAsyncSelect is the right tool here
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
 #endif
@@ -275,23 +276,22 @@ mrb_webview_m_initialize(mrb_state *mrb, mrb_value self) {
 }
 
 static mrb_value
-mrb_webview_m_destroy(mrb_state *mrb, mrb_value self) {
-  webview::webview *wv = mrb_cpp_get<webview::webview>(mrb, self);
-  if (wv) {
-    /* The C++ destructor unbinds every binding and tears down the
-     * platform window (GTK / Cocoa / WebView2). The std::function lambdas
-     * we passed to bind are destroyed with it; their captures (mrb, self,
-     * name_sym, wv) are released. Wiping the hidden `bindings` iv table
-     * drops the last references to the user's blocks so GC reclaims
-     * them; wiping `fds_procs` releases the Webview::_FDUD wrappers,
-     * whose destructors detach any still-attached GLib fd watchers. */
-    mrb_cpp_delete<webview::webview>(mrb, wv);
-    DATA_PTR(self) = nullptr;
-    DATA_TYPE(self) = nullptr;
-    mrb_iv_remove(mrb, self, MRB_SYM(bindings));
-    mrb_iv_remove(mrb, self, MRB_SYM(fds_procs));
-  }
-  return mrb_nil_value();
+mrb_webview_m_destroy(mrb_state* mrb, mrb_value self) {
+    webview::webview* wv = mrb_cpp_get<webview::webview>(mrb, self);
+    if (wv) {
+        mrb_cpp_delete<webview::webview>(mrb, wv);
+        DATA_PTR(self) = nullptr;
+        DATA_TYPE(self) = nullptr;
+        mrb_iv_remove(mrb, self, MRB_SYM(bindings));
+        mrb_iv_remove(mrb, self, MRB_SYM(fds_procs));
+#ifdef WEBVIEW_EDGE
+        /* Drop the wnd_ctx → its destructor severs USERDATA + DestroyWindow.
+         * sockmap is plain Ruby state, just clearing the iv is enough. */
+        mrb_iv_remove(mrb, self, MRB_SYM(_native_event_wnd_ctx));
+        mrb_iv_remove(mrb, self, MRB_SYM(_native_event_sockmap));
+#endif
+    }
+    return mrb_nil_value();
 }
 
 static mrb_value
@@ -758,12 +758,25 @@ struct mrb_webview_fd_ud {
 MRB_CPP_DEFINE_TYPE(mrb_webview_fd_ud, Webview_Userdata);
 
 
-/* Per-Webview context bound to the hidden window's GWLP_USERDATA. Wrapped
- * as a CData so its lifetime sits on mruby's GC ledger instead of being
- * hand-balanced new/delete; the Webview self holds it in a hidden iv. */
+/* Per-Webview context bound to the hidden window's GWLP_USERDATA. The
+ * struct OWNS the HWND: GC reclaims the ctx → destructor severs the
+ * WndProc → ctx link and DestroyWindow's the message-only window. No
+ * separate _native_event_hwnd cptr; the HWND lives where its lifetime
+ * is tracked. */
 struct mrb_webview_wnd_ctx {
-    mrb_state* mrb;
-    mrb_value  self;
+    mrb_state* mrb = nullptr;
+    mrb_value  self = mrb_nil_value();
+    HWND       hwnd = nullptr;
+
+    ~mrb_webview_wnd_ctx() {
+        if (hwnd) {
+            /* Sever before tear-down so any queued WM_FD finds USERDATA=0
+             * and bails out instead of dereffing a half-released ctx. */
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            DestroyWindow(hwnd);
+            hwnd = nullptr;
+        }
+    }
 };
 
 MRB_CPP_DEFINE_TYPE(mrb_webview_wnd_ctx, Webview_WndCtx);
@@ -778,6 +791,7 @@ mrb_webview_wnd_ctx_init(mrb_state* mrb, mrb_value self) {
     mrb_webview_wnd_ctx* ctx = mrb_cpp_get<mrb_webview_wnd_ctx>(mrb, self);
     ctx->mrb = mrb;
     ctx->self = wv;
+    /* hwnd stays NULL until get_or_create_wnd attaches it. */
     return self;
 }
 
@@ -844,11 +858,15 @@ mrb_webview_fd_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 static HWND
 mrb_webview_get_or_create_wnd(mrb_state* mrb, mrb_value self) {
-    mrb_value cached = mrb_iv_get(mrb, self, MRB_SYM(_native_event_hwnd));
-    if (mrb_cptr_p(cached)) return reinterpret_cast<HWND>(mrb_cptr(cached));
+    /* Cached path: the HWND lives inside the wnd_ctx CData. */
+    mrb_value ctx_v = mrb_iv_get(mrb, self, MRB_SYM(_native_event_wnd_ctx));
+    mrb_webview_wnd_ctx* ctx = nullptr;
+    if (mrb_data_p(ctx_v)) {
+        ctx = mrb_cpp_get<mrb_webview_wnd_ctx>(mrb, ctx_v);
+        if (ctx && ctx->hwnd) return ctx->hwnd;
+    }
 
     HINSTANCE hinst = GetModuleHandleW(nullptr);
-
     WNDCLASSEXW wc = {};
     if (!GetClassInfoExW(hinst, MRB_WEBVIEW_WND_CLASS, &wc)) {
         wc = {};
@@ -862,43 +880,32 @@ mrb_webview_get_or_create_wnd(mrb_state* mrb, mrb_value self) {
         }
     }
 
+    /* Allocate the ctx (rooted on self via the hidden iv) BEFORE creating
+     * any Win32 resource, so we never end up with an HWND that no CData
+     * destructor can reach. mrb_obj_new can raise (OOM); we want it to
+     * raise before there's anything to leak. */
+    if (!ctx) {
+        const mrb_value cargv[] = { self };
+        ctx_v = mrb_obj_new(mrb,
+            mrb_class_get_under_id(mrb, mrb_class(mrb, self), MRB_SYM(_WndCtx)),
+            1, cargv);
+        mrb_iv_set(mrb, self, MRB_SYM(_native_event_wnd_ctx), ctx_v);
+        ctx = mrb_cpp_get<mrb_webview_wnd_ctx>(mrb, ctx_v);
+    }
+
     HWND hwnd = CreateWindowExW(0, MRB_WEBVIEW_WND_CLASS, L"",
-        0, 0, 0, 0, 0,
-        HWND_MESSAGE, nullptr, hinst, nullptr);
+        0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, hinst, nullptr);
     if (!hwnd) {
+        /* ctx stays in place with hwnd=NULL — its destructor is a no-op
+         * in that state, so there's nothing to roll back. A retry will
+         * reuse the ctx and try CreateWindowEx again. */
         mrb_raisef(mrb, E_RUNTIME_ERROR,
             "CreateWindowEx (HWND_MESSAGE) failed: %d",
             (mrb_int)GetLastError());
     }
-
-    /* Allocate the ctx as a CData; root it on self via a hidden iv so GC
-     * keeps it alive for the same span as the HWND. */
-    const mrb_value cargv[] = { self };
-    mrb_value ctx_obj = mrb_obj_new(mrb,
-        mrb_class_get_under_id(mrb, mrb_class(mrb, self), MRB_SYM(_WndCtx)),
-        1, cargv);
-    mrb_iv_set(mrb, self, MRB_SYM(_native_event_wnd_ctx), ctx_obj);
-
-    mrb_webview_wnd_ctx* ctx = mrb_cpp_get<mrb_webview_wnd_ctx>(mrb, ctx_obj);
+    ctx->hwnd = hwnd;
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(ctx));
-
-    mrb_iv_set(mrb, self, MRB_SYM(_native_event_hwnd), mrb_cptr_value(mrb, hwnd));
     return hwnd;
-}
-
-static void
-mrb_webview_destroy_wnd(mrb_state* mrb, mrb_value self) {
-    mrb_value cached = mrb_iv_get(mrb, self, MRB_SYM(_native_event_hwnd));
-    if (!mrb_cptr_p(cached)) return;
-    HWND hwnd = reinterpret_cast<HWND>(mrb_cptr(cached));
-
-    /* Sever the WndProc → ctx link before tearing down the window so any
-     * stragglers in the message queue can't deref a half-released ctx. */
-    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-    DestroyWindow(hwnd);
-
-    mrb_iv_remove(mrb, self, MRB_SYM(_native_event_hwnd));
-    mrb_iv_remove(mrb, self, MRB_SYM(_native_event_wnd_ctx));
 }
 
 static mrb_value

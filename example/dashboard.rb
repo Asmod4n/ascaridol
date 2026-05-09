@@ -68,16 +68,6 @@ def benchmark(target_ms)
   { ops: ops, ms: ms, rate: rate }
 end
 
-# Run a snippet of Ruby and capture its return value or exception.
-def safe_eval(src)
-  return { ok: false, value: "(empty)" } if src.to_s.strip.empty?
-  begin
-    val = eval(src)
-    { ok: true, value: val.inspect }
-  rescue => e
-    { ok: false, value: "#{e.class}: #{e.message}" }
-  end
-end
 
 # ---- htmx router ----------------------------------------------------------
 
@@ -240,43 +230,12 @@ def render_bench_panel
   HTML
 end
 
-def render_eval_form(src = "Webview.version[:version]")
-  <<~HTML
-    <form id="eval-form" rb-post="/eval" rb-target="#eval-result" rb-swap="outerHTML"
-          rb-indicator="#eval-indicator">
-      <textarea name="src" placeholder="any ruby expression...">#{html_escape(src)}</textarea>
-      <div class="row" style="margin-top:.6rem; justify-content: space-between">
-        <span class="timing">RETURN VALUE WILL BE .inspect'D</span>
-        <button type="submit">EVAL</button>
-      </div>
-      <div id="eval-indicator" class="indicator"></div>
-    </form>
-  HTML
-end
 
-def render_eval_result(r = nil)
-  return "<div id='eval-result'></div>" if r.nil?
-  if r[:ok]
-    "<div id='eval-result'><pre style='border-color:#c8f542'>#{html_escape(r[:value])}</pre></div>"
-  else
-    "<div id='eval-result'><div class='error'>#{html_escape(r[:value])}</div></div>"
-  end
-end
-
-def render_eval_panel
-  <<~HTML
-    <div class="panel full">
-      <h2>RUBY EVAL · DEMO ONLY</h2>
-      #{render_eval_form}
-      #{render_eval_result(nil)}
-    </div>
-  HTML
-end
 
 def render_page(w_bindings)
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>dashboard</title>
-    #{Webview::MRUBY_ROUTER_EXT}<style>#{CSS}</style></head>
+    #{Webview.html_router(:route)}<style>#{CSS}</style></head>
     <body><h1>MRUBY-WEBVIEW DASHBOARD</h1>
     <div class="grid">
       #{render_webview_panel}
@@ -284,7 +243,6 @@ def render_page(w_bindings)
       #{render_env_panel}
       #{render_bindings_panel(w_bindings)}
       #{render_bench_panel}
-      #{render_eval_panel}
     </div>
     </body></html>
   HTML
@@ -299,14 +257,14 @@ def route(method, path, params)
     ms = 200 if ms < 50
     ms = 5000 if ms > 5000
     render_bench_result(benchmark(ms))
-  when ["POST", "/eval"]
-    render_eval_result(safe_eval(params["src"].to_s))
   else
     "<p style='color:crimson'>404 #{method} #{path}</p>"
   end
 end
 
-Webview.open(title: "dashboard x mruby", size: [900, 720], debug: true) do |w|
-  w.bind(:htmx_route) { |m, p, params| route(m, p, params) }
-  w.html = render_page(w.bindings.map(&:to_s))
+def main(args)
+    Webview.open(title: "dashboard x mruby", size: [900, 720], debug: true) do |w|
+      w.bind(:route) { |m, p, params| route(m, p, params) }
+      w.html = render_page(w.bindings.map(&:to_s))
+    end
 end

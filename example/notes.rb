@@ -53,9 +53,11 @@ class NoteStore
     @db.del(id) rescue nil
   end
 
-  def new_id
-    "n_#{(Time.now.to_f * 1000).to_i rescue rand(1 << 32)}"
-  end
+def new_id
+  @counter ||= 0
+  @counter += 1
+  "n_#{Time.now.to_i}_#{@counter}"
+end
 
   private
 
@@ -210,7 +212,7 @@ def render_page
     "letter-spacing:.15em'>mruby-lmdb / mruby-cbor not loaded — running in read-only demo mode</div>"
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>notes</title>
-    #{Webview::MRUBY_ROUTER_EXT}<style>#{CSS}</style></head>
+    #{Webview.html_router(:route)}<style>#{CSS}</style></head>
     <body>
     #{banner}
     <header>
@@ -270,6 +272,8 @@ def route(method, path, params)
 end
 
 Webview.open(title: "notes x mruby", size: [900, 620], debug: true) do |w|
-  w.bind(:htmx_route) { |m, p, params| route(m, p, params) }
+w.bind(:route) do |m, p, params|
+    route(m, p, params || {})
+end
   w.html = render_page
 end

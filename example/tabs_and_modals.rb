@@ -28,86 +28,6 @@ PEOPLE = [
   { name: "eve",    role: "engineer",  tz: "UTC-3" },
 ]
 
-MRUBY_ROUTER_EXT = <<~'JS'
-  <script>
-    (function () {
-      var SEL = '[rb-get],[rb-post],[rb-put],[rb-patch],[rb-delete]';
-      var VERBS = ['get', 'post', 'put', 'patch', 'delete'];
-
-      function methodAndPath(elt) {
-        for (var i = 0; i < VERBS.length; i++) {
-          if (elt.hasAttribute('rb-' + VERBS[i])) {
-            return { method: VERBS[i].toUpperCase(),
-                     path: elt.getAttribute('rb-' + VERBS[i]) };
-          }
-        }
-      }
-
-      function dispatch(elt, e) {
-        if (e) e.preventDefault();
-        var mp = methodAndPath(elt); if (!mp) return;
-
-        var params = {};
-        var raw = elt.getAttribute('rb-vals');
-        if (raw) try { Object.assign(params, JSON.parse(raw)); } catch (_) {}
-        if (elt.tagName === 'FORM') {
-          new FormData(elt).forEach(function (v, k) { params[k] = v; });
-        }
-
-        var targetSel = elt.getAttribute('rb-target');
-        var target    = (!targetSel || targetSel === 'this') ? elt :
-                        document.querySelector(targetSel);
-        var swap      = elt.getAttribute('rb-swap') || 'innerHTML';
-
-        // "delete" doesn't even need the server response — handle locally
-        if (swap === 'delete') {
-          if (target) target.remove();
-          return;
-        }
-
-        window.htmx_route(mp.method, mp.path, params).then(function (html) {
-          if (!target) return;
-          if (swap === 'outerHTML')        target.outerHTML = html;
-          else if (swap === 'beforeend')   target.insertAdjacentHTML('beforeend', html);
-          else if (swap === 'afterbegin')  target.insertAdjacentHTML('afterbegin', html);
-          else if (swap === 'afterend')    target.insertAdjacentHTML('afterend',  html);
-          else if (swap === 'beforebegin') target.insertAdjacentHTML('beforebegin', html);
-          else                             target.innerHTML = html;
-        }).catch(function (err) {
-          console.error('[mruby-router]', err && err.message || err);
-        });
-      }
-
-      function wire(root) {
-        root.querySelectorAll(SEL).forEach(function (elt) {
-          if (elt.__rb_wired) return;
-          elt.__rb_wired = true;
-          var trig = (elt.getAttribute('rb-trigger') ||
-                     (elt.tagName === 'FORM' ? 'submit' : 'click')).split(/\s*,\s*/);
-          trig.forEach(function (t) {
-            elt.addEventListener(t.trim(), function (e) { dispatch(elt, e); });
-          });
-        });
-      }
-
-      // Esc dismisses any visible modal
-      document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') {
-          var m = document.getElementById('modal');
-          if (m) m.remove();
-        }
-      });
-
-      document.addEventListener('DOMContentLoaded', function () { wire(document); });
-      new MutationObserver(function (muts) {
-        muts.forEach(function (m) { m.addedNodes.forEach(function (n) {
-          if (n.nodeType === 1) wire(n);
-        }); });
-      }).observe(document.documentElement, { childList: true, subtree: true });
-    })();
-  </script>
-JS
-
 CSS = <<~'CSS'
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Courier New', monospace; background: #0f0f0f; color: #e8e8e8; padding: 2rem; }
@@ -295,7 +215,7 @@ end
 def render_page
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>tabs + modals</title>
-    #{MRUBY_ROUTER_EXT}<style>#{CSS}</style></head>
+    #{Webview.html_router(:route)}<style>#{CSS}</style></head>
     <body><h1>TABS + MODALS x MRUBY</h1>
     #{render_main(:projects)}
     </body></html>
@@ -348,6 +268,6 @@ def route(method, path, _params)
 end
 
 Webview.open(title: "tabs + modals x mruby", size: [820, 620], debug: true) do |w|
-  w.bind(:htmx_route) { |m, p, params| route(m, p, params) }
+  w.bind(:route) { |m, p, params| route(m, p, params) }
   w.html = render_page
 end

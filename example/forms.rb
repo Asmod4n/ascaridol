@@ -13,80 +13,6 @@
 
 $users = ["alice", "bob"] # already-taken handles
 
-MRUBY_ROUTER_EXT = <<~'JS'
-  <script>
-    (function () {
-      var SEL = '[rb-get],[rb-post],[rb-put],[rb-patch],[rb-delete]';
-      var VERBS = ['get', 'post', 'put', 'patch', 'delete'];
-
-      function methodAndPath(elt) {
-        for (var i = 0; i < VERBS.length; i++) {
-          if (elt.hasAttribute('rb-' + VERBS[i])) {
-            return { method: VERBS[i].toUpperCase(),
-                     path: elt.getAttribute('rb-' + VERBS[i]) };
-          }
-        }
-      }
-
-      function dispatch(elt, e) {
-        if (e) e.preventDefault();
-        var mp = methodAndPath(elt); if (!mp) return;
-
-        var params = {};
-        var raw = elt.getAttribute('rb-vals');
-        if (raw) try { Object.assign(params, JSON.parse(raw)); } catch (_) {}
-        if (elt.tagName === 'FORM') {
-          new FormData(elt).forEach(function (v, k) { params[k] = v; });
-        } else if (elt.name) {
-          params[elt.name] = elt.value;
-          // also include sibling form fields when validating inline
-          var form = elt.closest('form');
-          if (form) new FormData(form).forEach(function (v, k) { params[k] = v; });
-        }
-
-        var targetSel = elt.getAttribute('rb-target');
-        var target    = targetSel ? document.querySelector(targetSel) : elt;
-        var swap      = elt.getAttribute('rb-swap') || 'innerHTML';
-
-        window.htmx_route(mp.method, mp.path, params).then(function (html) {
-          if (swap === 'outerHTML')  target.outerHTML = html;
-          else if (swap === 'beforeend')  target.insertAdjacentHTML('beforeend',  html);
-          else if (swap === 'afterbegin') target.insertAdjacentHTML('afterbegin', html);
-          else target.innerHTML = html;
-          if (elt.hasAttribute('rb-reset') && elt.tagName === 'FORM') elt.reset();
-        }).catch(function (err) {
-          console.error('[mruby-router]', err && err.message || err);
-        });
-      }
-
-      function trigger(elt) {
-        return (elt.getAttribute('rb-trigger') ||
-                (elt.tagName === 'FORM' ? 'submit' :
-                 elt.tagName === 'INPUT' || elt.tagName === 'TEXTAREA' ? 'change' :
-                 'click')).split(/\s+/);
-      }
-
-      function wire(root) {
-        root.querySelectorAll(SEL).forEach(function (elt) {
-          if (elt.__rb_wired) return;
-          elt.__rb_wired = true;
-          trigger(elt).forEach(function (ev) {
-            elt.addEventListener(ev, function (e) { dispatch(elt, e); });
-          });
-        });
-      }
-
-      document.addEventListener('DOMContentLoaded', function () { wire(document); });
-      // also re-wire after every successful swap
-      var mo = new MutationObserver(function (muts) {
-        muts.forEach(function (m) { m.addedNodes.forEach(function (n) {
-          if (n.nodeType === 1) wire(n);
-        }); });
-      });
-      mo.observe(document.documentElement, { childList: true, subtree: true });
-    })();
-  </script>
-JS
 
 CSS = <<~'CSS'
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -203,7 +129,7 @@ end
 def render_page
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>forms</title>
-    #{MRUBY_ROUTER_EXT}<style>#{CSS}</style></head>
+    #{Webview.html_router(:route)}<style>#{CSS}</style></head>
     <body><h1>FORMS x VALIDATION</h1>
     #{render_card(render_form)}
     </body></html>
@@ -235,6 +161,6 @@ def route(method, path, params)
 end
 
 Webview.open(title: "forms x mruby", size: [600, 600], debug: true) do |w|
-  w.bind(:htmx_route) { |m, p, params| route(m, p, params) }
+  w.bind(:route) { |m, p, params| route(m, p, params) }
   w.html = render_page
 end

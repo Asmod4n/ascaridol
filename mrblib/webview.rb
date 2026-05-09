@@ -19,6 +19,34 @@ class Webview
         w.destroy unless w.destroyed?
       end
     end
+
+    # Returns a <script> block that wires rb-{get,post,put,patch,delete}
+    # attributes in the page to a Ruby-bound function. Drop it into <head>.
+    #
+    #   wv.bind(:route) { |method, path, params| ... }
+    #   wv.html = "<head>#{Webview.html_router(:route)}</head>..."
+    #
+    # The bind name must be a plain ASCII JS identifier.
+    def html_router(bind_name)
+      name = bind_name.to_s
+      raise ArgumentError, "router bind name must be a JS identifier" \
+        unless js_identifier?(name)
+      ROUTER_TEMPLATE.render('route_fn' => name)
+    end
+
+    private
+
+    def js_identifier?(s)
+      return false if s.empty?
+      s.each_char.with_index do |c, i|
+        ok = (c >= 'a' && c <= 'z') ||
+             (c >= 'A' && c <= 'Z') ||
+             c == '_' || c == '$' ||
+             (i > 0 && c >= '0' && c <= '9')
+        return false unless ok
+      end
+      true
+    end
   end
 
   alias _native_initialize initialize
@@ -102,9 +130,13 @@ class Webview
     JS
   end
 
-  MRUBY_ROUTER_EXT = <<~'JS'
+  # rb-{verb} attribute router. The bind name is templated in via Mustache so
+  # users can pick whatever they want for the Ruby-side function. Compiled
+  # once at load.
+  ROUTER_TEMPLATE = Mustache::Template.compile(<<~'JS')
   <script>
     (function () {
+      var ROUTE = window.{{route_fn}};
       var SEL = '[rb-get],[rb-post],[rb-put],[rb-patch],[rb-delete]';
       var VERBS = ['get', 'post', 'put', 'patch', 'delete'];
 
@@ -117,16 +149,51 @@ class Webview
         }
       }
 
+      function parseDuration(s) {
+        var m = /^(\d+(?:\.\d+)?)(ms|s)?$/.exec(s || '');
+        if (!m) return 0;
+        var n = parseFloat(m[1]);
+        return m[2] === 's' ? n * 1000 : n;
+      }
+
+      // 'input changed delay:200ms, click'
+      //   -> [{event:'input',changed:true,delay:200},{event:'click'}]
+      function parseTriggers(spec, defaultEv) {
+        if (!spec) return [{ event: defaultEv }];
+        return spec.split(/\s*,\s*/).map(function (chunk) {
+          var parts = chunk.trim().split(/\s+/);
+          var t = { event: parts[0] };
+          for (var i = 1; i < parts.length; i++) {
+            var p = parts[i], c = p.indexOf(':');
+            if (c >= 0) {
+              var key = p.slice(0, c), val = p.slice(c + 1);
+              if (key === 'delay') t.delay = parseDuration(val);
+            } else {
+              t[p] = true; // 'changed', 'once', ...
+            }
+          }
+          return t;
+        });
+      }
+
       function dispatch(elt, e) {
-        if (e) e.preventDefault();
+        if (e && e.preventDefault) e.preventDefault();
         var mp = methodAndPath(elt); if (!mp) return;
 
         var params = {};
-        var raw = elt.getAttribute('rb-vals');
-        if (raw) try { Object.assign(params, JSON.parse(raw)); } catch (_) {}
+
+        // 1. Lone form-control: contribute its own name/value first so an
+        //    explicit rb-vals can still override it.
+        if (elt.tagName !== 'FORM' && elt.name && 'value' in elt) {
+          params[elt.name] = elt.value;
+        }
+        // 2. FORM: harvest every named field.
         if (elt.tagName === 'FORM') {
           new FormData(elt).forEach(function (v, k) { params[k] = v; });
         }
+        // 3. rb-vals JSON wins over both.
+        var raw = elt.getAttribute('rb-vals');
+        if (raw) try { Object.assign(params, JSON.parse(raw)); } catch (_) {}
 
         var targetSel = elt.getAttribute('rb-target');
         var target    = targetSel ? document.querySelector(targetSel) : elt;
@@ -137,7 +204,7 @@ class Webview
         if (ind) ind.classList.add('busy');
         elt.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
 
-        window.htmx_route(mp.method, mp.path, params).then(function (html) {
+        ROUTE(mp.method, mp.path, params).then(function (html) {
           if (swap === 'outerHTML') target.outerHTML = html;
           else target.innerHTML = html;
         }).catch(function (err) {
@@ -153,12 +220,33 @@ class Webview
         root.querySelectorAll(SEL).forEach(function (elt) {
           if (elt.__rb_wired) return;
           elt.__rb_wired = true;
-          var trig = (elt.getAttribute('rb-trigger') ||
-                     (elt.tagName === 'FORM' ? 'submit' : 'click')).split(/\s*,\s*/);
-          trig.forEach(function (t) {
-            var ev = t.trim();
-            if (ev === 'load') { dispatch(elt); return; }
-            elt.addEventListener(ev, function (e) { dispatch(elt, e); });
+
+          var defaultEv =
+            elt.tagName === 'FORM' ? 'submit' :
+            (elt.tagName === 'INPUT' || elt.tagName === 'TEXTAREA' ||
+             elt.tagName === 'SELECT') ? 'change' : 'click';
+
+          var triggers = parseTriggers(elt.getAttribute('rb-trigger'), defaultEv);
+
+          triggers.forEach(function (t) {
+            if (t.event === 'load') { dispatch(elt); return; }
+
+            var lastValue = ('value' in elt) ? elt.value : undefined;
+            var timer = null;
+
+            elt.addEventListener(t.event, function (e) {
+              if (t.changed) {
+                var v = elt.value;
+                if (v === lastValue) return;
+                lastValue = v;
+              }
+              if (t.delay) {
+                clearTimeout(timer);
+                timer = setTimeout(function () { dispatch(elt, e); }, t.delay);
+              } else {
+                dispatch(elt, e);
+              }
+            });
           });
         });
       }
@@ -171,5 +259,5 @@ class Webview
       }).observe(document.documentElement, { childList: true, subtree: true });
     })();
   </script>
-JS
+  JS
 end
