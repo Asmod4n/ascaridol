@@ -2,7 +2,7 @@ require 'rake'
 require 'fileutils'
 
 MRUBY_CONFIG_PATH = File.expand_path(ENV["MRUBY_CONFIG"] || "build_config.rb")
-DEFAULT_SCRIPT    = File.expand_path("example/dashboard.rb")
+DEFAULT_SCRIPT    = File.expand_path("tools/hypha/stub.rb")
 EMBED_SOURCE      = File.expand_path("tools/hypha/main.c")
 
 # Resolve which Ruby script to embed. Argument wins over env var wins over default.
@@ -35,6 +35,13 @@ file :mruby do
   unless File.directory?('mruby')
     sh "git clone --depth=1 https://github.com/mruby/mruby.git"
   end
+end
+
+desc "regenerate the no-app-embedded stub"
+task :regen_stub => :mruby do
+  stub_rb = File.expand_path("tools/hypha/stub.rb")
+  abort "stub.rb not found" unless File.exist?(stub_rb)
+  sh %Q{"#{mrbc_path}" -Bhypha_main -o "#{EMBED_SOURCE}" "#{stub_rb}"}
 end
 
 desc "embed Ruby script into src/main.c (default: example/hello.rb)"
