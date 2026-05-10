@@ -32,7 +32,6 @@ def mruby_info
     "RUBY_ENGINE"       => (Object.const_defined?(:RUBY_ENGINE)       ? RUBY_ENGINE       : "?"),
     "MRUBY_VERSION"     => (Object.const_defined?(:MRUBY_VERSION)     ? MRUBY_VERSION     : "?"),
     "MRUBY_RELEASE_NO"  => (Object.const_defined?(:MRUBY_RELEASE_NO)  ? MRUBY_RELEASE_NO.to_s  : "?"),
-    "RUBY_PLATFORM"     => (Object.const_defined?(:RUBY_PLATFORM)     ? RUBY_PLATFORM     : "?"),
   }
 end
 

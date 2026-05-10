@@ -69,3 +69,4 @@ compile_commands.json
 
 # NuGet packages directory (restored from packages.config)
 /packages/
+/tools/hypha/main.c

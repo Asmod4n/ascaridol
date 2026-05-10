@@ -30,37 +30,11 @@ html = <<~HTML
   </html>
 HTML
 
-s = TCPServer.new 1600
-s.listen 1000
-
 Hypha.run(title: 'mruby-webview demo', size: [640, 480], debug: true) do |w|
-  w.add_native_event(s) do |fd, _what|
-    loop do
-      client = begin
-        fd.accept
-      rescue Errno::EWOULDBLOCK
-        nil
-      end
-      break unless client
 
-      body = "hello"
-      client.write(
-        "HTTP/1.1 200 OK\r\n" \
-        "Content-Type: text/html; charset=utf-8\r\n" \
-        "Content-Length: #{body.bytesize}\r\n" \
-        "Connection: close\r\n" \
-        "\r\n" \
-        "#{body}"
-      )
-      client.close
-    end
-    true   # keep the watcher armed
-  end
   w.bind(:greet) do |name|
     "Hello, #{name}! (replied at #{Time.now rescue 'now'})"
   end
-
-  w.bind(:quit) { w.terminate }
 
   w.html = html
 end

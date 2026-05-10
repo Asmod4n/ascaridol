@@ -1,12 +1,12 @@
-<div align="center">
-  <img src="hypha.svg" alt="Hypha" width="160" height="160">
+<p align="center">
+  <img src="hypha.svg" alt="Hypha logo" width="160">
+</p>
 
-  # Hypha
+<h1 align="center">Hypha</h1>
 
-  **Desktop apps in mruby, with HTML/CSS/JS for the UI.**
+<p align="center"><strong>Desktop apps in mruby, with HTML/CSS/JS for the UI.</strong></p>
 
-  A single native binary, a webview, and Ruby for everything in between.
-</div>
+<p align="center">A single native binary, a webview, and Ruby for everything in between.</p>
 
 ---
 
@@ -65,8 +65,8 @@ stable enough to commit to. Expect rough edges. Bug reports welcome.
 
 Tested on:
 - Windows 11 (WebView2 + Edge)
-- macOS 18+ (WKWebView)
-- CachyOS
+- macOS 14+ (WKWebView)
+- Linux (CachyOS/Arch)
 
 ## Install
 
@@ -74,8 +74,8 @@ Hypha ships as source. You build the `hypha` binary once, then any Hypha
 app is a Ruby script that you compile against that binary.
 
 ```sh
-git clone https://github.com/Asmod4n/hypha.git
-cd hypha
+git clone https://github.com/Asmod4n/mruby-webview
+cd mruby-webview
 rake
 ```
 
@@ -242,27 +242,13 @@ Supported attributes:
 Forms harvest their named fields automatically. Lone form-controls (input,
 select, textarea) contribute their name/value. `rb-vals` overrides both.
 
-## Per-platform UI
-
-Hypha exposes `Hypha.platform` (returns `:windows`, `:macos`, `:linux`, or
-`:unknown`) and sets `document.documentElement.dataset.platform` to the same
-string at page load. Use either to write platform-specific HTML/CSS:
-
-```css
-html[data-platform="macos"] [data-not-on-macos] { display: none; }
-html[data-platform="windows"] [data-only-on-macos] { display: none; }
-```
-
-Useful for menubar conventions, keyboard shortcut hints, and other places
-where platforms genuinely differ.
-
 ## Threading model
 
 mruby is single-threaded. Hypha's design assumes that, and provides one
 escape hatch (`Hypha.dispatch`) for users who bring their own threads via
 C extensions.
 
-The architectural rule: **only the main thread ever touches `mrb_state`.**
+The architectural rule: **only the main thread ever touches the `mrb_state` of Hypha.**
 Hypha methods called from worker threads either dispatch a lambda onto main
 (for value-only operations: `title=`, `html=`, `eval`, etc.) or raise
 (for operations that need the main `mrb_state`: `bind`, `add_native_event`).
@@ -270,8 +256,7 @@ Hypha methods called from worker threads either dispatch a lambda onto main
 Procs cross thread boundaries via cbor: the proc's irep is dumped, sent as
 bytes, and reconstructed on main. The proc must be self-contained — it can
 take arguments but can't reference anything from the worker's scope. Captured
-variables get NoMethodError at first invocation on main, with a real
-backtrace.
+variables raise Errors at first invocation on main.
 
 ## Distribution and signing
 
@@ -304,20 +289,31 @@ the technical audience Hypha is aimed at.
 
 ## Building apps with Hypha
 
-The current model: write your Ruby script, embed it via `mrbc` into the
-`hypha` binary at build time, ship the resulting binary.
+Hypha apps are Ruby scripts compiled into the `hypha` binary at build time.
+The Rakefile handles the embed-and-build cycle for you:
 
 ```sh
-mrbc -B hypha_main -o hypha_main.c your_app.rb
-# rebuild with hypha_main.c instead of the default
-rake
+rake compile                              # builds with example/hello.rb
+rake compile[example/dashboard.rb]        # builds with your script
+rake 'compile[path/to/myapp.rb]'          # quote the brackets in zsh / fish
 ```
 
-The resulting binary contains your script. Distribute that binary as your app.
+Or set the script via env var:
 
-A more polished `hypha bundle` workflow (where users build their app from the
-command line without touching the gem source) is planned for v0.2. For v0.1,
-the build is manual but transparent.
+```sh
+HYPHA_SCRIPT=example/dashboard.rb rake compile
+```
+
+The result is `mruby/build/host/bin/hypha` (or `hypha.exe` on Windows) with
+your script embedded. Distribute that binary as your app.
+
+If you want to embed a script without rebuilding the binary (e.g. while
+iterating), `rake embed[your_script.rb]` regenerates `tools/hypha/main.c`
+from the script. The next `rake compile` picks it up.
+
+A more polished `hypha bundle` workflow (where users build their app from
+the command line without touching the gem source) is planned for v0.2. For
+v0.1, the build is manual but transparent.
 
 ## Project structure
 
@@ -344,7 +340,7 @@ that all raise "Hypha is not running"); `tools/hypha/` only links into the
 
 ## License
 
-MIT. See LICENSE.
+Apache-2.0. See LICENSE.
 
 ## Acknowledgments
 
