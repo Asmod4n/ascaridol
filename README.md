@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="hypha.svg" alt="Hypha" width="160" height="160">
+  <img src="Hypha.svg" alt="Hypha" width="160" height="160">
 
   # Hypha
 
@@ -74,7 +74,7 @@ Hypha ships as source. You build the `hypha` binary once, then any Hypha
 app is a Ruby script that you compile against that binary.
 
 ```sh
-git clone https://github.com/Asmod4n/hypha.git
+git clone https://github.com/Asmod4n/hypha-mrb.git
 cd hypha
 rake
 ```
