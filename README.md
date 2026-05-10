@@ -1,13 +1,12 @@
 <div align="center">
   <img src="Hypha.svg" alt="Hypha" width="160" height="160">
 
-<h1 align="center">Hypha</h1>
+<h1>Hypha</h1>
 
-<p align="center"><strong>Desktop apps in mruby, with HTML/CSS/JS for the UI.</strong></p>
+<p><strong>Desktop apps in mruby, with HTML/CSS/JS for the UI.</strong></p>
 
-<p align="center">A single native binary, a webview, and Ruby for everything in between.</p>
-
----
+<p>A single native binary, a webview, and Ruby for everything in between.</p>
+</div>
 
 ## What is this
 
@@ -168,7 +167,7 @@ becomes ready.
 ```ruby
 Hypha.add_native_event($stdin) do |io, events|
   line = io.gets
-  Hypha.eval("console.log(#{line.to_json})")
+  Hypha.eval("console.log(#{JSON.dump(line)})")
   true   # return falsy to stop watching
 end
 ```
