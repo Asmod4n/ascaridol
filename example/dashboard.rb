@@ -16,7 +16,7 @@
 # ---- collectors -----------------------------------------------------------
 
 def webview_info
-  v = Webview.version rescue nil
+  v = Hypha.version rescue nil
   return { "available" => "false" } unless v
   {
     "version"         => v[:version],
@@ -235,7 +235,7 @@ end
 def render_page(w_bindings)
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>dashboard</title>
-    #{Webview.html_router(:route)}<style>#{CSS}</style></head>
+    #{Hypha.html_router(:route)}<style>#{CSS}</style></head>
     <body><h1>MRUBY-WEBVIEW DASHBOARD</h1>
     <div class="grid">
       #{render_webview_panel}
@@ -262,9 +262,8 @@ def route(method, path, params)
   end
 end
 
-def main(args)
-    Webview.open(title: "dashboard x mruby", size: [900, 720], debug: true) do |w|
+
+    Hypha.run(title: "dashboard x mruby", size: [900, 720], debug: true) do |w|
       w.bind(:route) { |m, p, params| route(m, p, params) }
       w.html = render_page(w.bindings.map(&:to_s))
     end
-end

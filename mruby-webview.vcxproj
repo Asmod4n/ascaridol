@@ -133,6 +133,7 @@
     <ClCompile Include="vendor\webview\test_driver\src\test_driver.cc" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\mrb_webview.h" />
     <ClInclude Include="vendor\webview\compatibility\mingw\include\EventToken.h" />
     <ClInclude Include="vendor\webview\core\include\webview.h" />
     <ClInclude Include="vendor\webview\core\include\webview\api.h" />

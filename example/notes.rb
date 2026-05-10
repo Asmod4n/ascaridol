@@ -212,7 +212,7 @@ def render_page
     "letter-spacing:.15em'>mruby-lmdb / mruby-cbor not loaded — running in read-only demo mode</div>"
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>notes</title>
-    #{Webview.html_router(:route)}<style>#{CSS}</style></head>
+    #{Hypha.html_router(:route)}<style>#{CSS}</style></head>
     <body>
     #{banner}
     <header>
@@ -271,7 +271,7 @@ def route(method, path, params)
   end || "<p style='color:crimson'>404 #{method} #{path}</p>"
 end
 
-Webview.open(title: "notes x mruby", size: [900, 620], debug: true) do |w|
+Hypha.run(title: "notes x mruby", size: [900, 620], debug: true) do |w|
 w.bind(:route) do |m, p, params|
     route(m, p, params || {})
 end

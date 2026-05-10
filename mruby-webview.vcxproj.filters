@@ -269,10 +269,16 @@
     <ClInclude Include="vendor\webview\test_driver\include\webview\test_driver.hh">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\mrb_webview.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="vendor\webview\examples\resources\windows\resources.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
   </ItemGroup>
 </Project>

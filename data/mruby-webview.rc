@@ -1,0 +1,10 @@
+#include <winuser.h>
+
+/* Resource ID 1, type RT_MANIFEST (24) — Windows looks for exactly this
+ * combo at process start to apply per-application settings. */
+1 24 "mruby-webview.manifest"
+
+/* Application icon. Resource ID 1 of type ICON. Windows Explorer picks
+ * the lowest-numbered ICON resource as the .exe's display icon, so this
+ * is what shows up in the taskbar, Alt-Tab, file browser, etc. */
+1 ICON "hypha.ico"

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="bgGlow" cx="0.5" cy="0.42" r="0.7">
+      <stop offset="0" stop-color="#2a2118" stop-opacity="1"></stop>
+      <stop offset="1" stop-color="#15110c" stop-opacity="1"></stop>
+    </radialGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="228" ry="228" fill="url(#bgGlow)"></rect>
+
+  <g fill="#efe2c9">
+    <rect x="288" y="256" width="80" height="512" rx="40"></rect>
+    <rect x="656" y="256" width="80" height="512" rx="40"></rect>
+    <rect x="328" y="472" width="368" height="80" rx="40"></rect>
+
+    <circle cx="328" cy="256" r="60"></circle>
+    <circle cx="328" cy="768" r="60"></circle>
+    <circle cx="696" cy="256" r="60"></circle>
+    <circle cx="696" cy="768" r="60"></circle>
+
+    <circle cx="328" cy="512" r="48"></circle>
+    <circle cx="696" cy="512" r="48"></circle>
+  </g>
+
+  <g>
+    <circle cx="172" cy="372" r="22" fill="#d4a874"></circle>
+    <circle cx="128" cy="348" r="12" fill="#7fb6b0"></circle>
+    <circle cx="852" cy="652" r="22" fill="#d4a874"></circle>
+    <circle cx="896" cy="676" r="12" fill="#7fb6b0"></circle>
+  </g>
+</svg>

@@ -1,6 +1,6 @@
 
 assert('Webview.version') do
-  v = Webview.version
+  v = Hypha.version
   assert_kind_of Hash, v
   assert_kind_of Integer, v[:major]
   assert_kind_of Integer, v[:minor]

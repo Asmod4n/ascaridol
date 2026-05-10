@@ -33,7 +33,7 @@ HTML
 s = TCPServer.new 1600
 s.listen 1000
 
-Webview.open(title: 'mruby-webview demo', size: [640, 480], debug: true) do |w|
+Hypha.run(title: 'mruby-webview demo', size: [640, 480], debug: true) do |w|
   w.add_native_event(s) do |fd, _what|
     loop do
       client = begin

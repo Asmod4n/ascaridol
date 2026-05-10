@@ -1,4 +1,4 @@
-MRuby::Gem::Specification.new('mruby-webview') do |spec|
+MRuby::Gem::Specification.new('hypha-mrb') do |spec|
   spec.license = 'MIT'
   spec.author  = 'Hendrik Beskow'
   spec.summary = 'Idiomatic Ruby bindings for the webview/webview library'
@@ -11,6 +11,7 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
   spec.add_dependency 'mruby-uri-parser'
   spec.add_dependency 'mruby-mustache', github: 'Asmod4n/mruby-mustache', branch: 'main'
   spec.add_dependency 'typedargs'
+  spec.add_dependency 'mruby-proc-irep-ext'
   spec.add_dependency 'mruby-string-ext', core: 'mruby-string-ext'
   spec.add_dependency 'mruby-hash-ext',   core: 'mruby-hash-ext'
   spec.add_dependency 'mruby-symbol-ext', core: 'mruby-symbol-ext'
@@ -70,23 +71,54 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
 
   if is_windows
     spec.linker.libraries.concat(%w[advapi32 ole32 shell32 shlwapi user32 version])
-      pkg_dir = Dir.glob(File.join(spec.dir, 'packages', 'Microsoft.Web.WebView2.*')).max
-      pkg_dir ||= ENV['WEBVIEW2_SDK']
-      abort "[mruby-webview] WebView2 SDK not found — run: nuget install Microsoft.Web.WebView2 -OutputDirectory packages" unless pkg_dir
 
-      sdk_inc = File.join(pkg_dir, 'build', 'native', 'include')
-      abort "[mruby-webview] WebView2.h not found at #{sdk_inc}" unless File.exist?(File.join(sdk_inc, 'WebView2.h'))
+    pkg_dir = Dir.glob(File.join(spec.dir, 'packages', 'Microsoft.Web.WebView2.*')).max
+    pkg_dir ||= ENV['WEBVIEW2_SDK']
+    abort "[mruby-webview] WebView2 SDK not found — run: nuget install Microsoft.Web.WebView2 -OutputDirectory packages" unless pkg_dir
 
-      spec.cc.include_paths  << sdk_inc
-      spec.cxx.include_paths << sdk_inc
+    sdk_inc = File.join(pkg_dir, 'build', 'native', 'include')
+    abort "[mruby-webview] WebView2.h not found at #{sdk_inc}" unless File.exist?(File.join(sdk_inc, 'WebView2.h'))
+
+    spec.cc.include_paths  << sdk_inc
+    spec.cxx.include_paths << sdk_inc
+
+    # ----------------------------------------------------------------------
+    # Compile and link the Win32 manifest so the final .exe declares
+    # UTF-8 active codepage, long paths, per-monitor DPI v2, and a
+    # Common-Controls 6 dependency for themed menus.
+    # ----------------------------------------------------------------------
+    rc_src     = File.join(spec.dir, 'data', 'mruby-webview.rc')
+    rc_obj_dir = File.join(build.build_dir, 'mrbgems', spec.name)
+    FileUtils.mkdir_p(rc_obj_dir)
+
+    rc_obj = if toolchains.include?('visualcpp')
+      File.join(rc_obj_dir, 'mruby-webview.res')
+    else
+      File.join(rc_obj_dir, 'mruby-webview.res.o')
+    end
+
+    if toolchains.include?('visualcpp')
+      unless File.exist?(rc_obj) && File.mtime(rc_obj) > File.mtime(rc_src)
+        sh "rc.exe", "/nologo", "/I", File.dirname(rc_src), "/fo", rc_obj, rc_src
+      end
+    else
+      windres = ENV['WINDRES'] || (cc_command =~ /(.+?-)gcc(\.exe)?$/ ? "#{$1}windres" : 'windres')
+      unless File.exist?(rc_obj) && File.mtime(rc_obj) > File.mtime(rc_src)
+        sh windres, "--include-dir=#{File.dirname(rc_src)}", "-i", rc_src, "-o", rc_obj, "-O", "coff"
+      end
+    end
+
+    spec.linker.flags_before_libraries << rc_obj
+
   elsif is_darwin
     spec.linker.flags_after_libraries.concat(%w[-framework WebKit -framework Cocoa])
     spec.linker.libraries << 'c++'
+
   else
     pkg = ENV['MRUBY_WEBVIEW_PKG']
-    pkg ||= %w[gtk4 webkitgtk-6.0].all? { |p| system("pkg-config --exists #{p}") } ? 'gtk4 webkitgtk-6.0' : nil
-    pkg ||= %w[gtk+-3.0 webkit2gtk-4.1].all? { |p| system("pkg-config --exists #{p}") } ? 'gtk+-3.0 webkit2gtk-4.1' : nil
-    pkg ||= %w[gtk+-3.0 webkit2gtk-4.0].all? { |p| system("pkg-config --exists #{p}") } ? 'gtk+-3.0 webkit2gtk-4.0' : nil
+    pkg ||= %w[gtk4 webkitgtk-6.0].all?       { |p| system("pkg-config --exists #{p}") } ? 'gtk4 webkitgtk-6.0'      : nil
+    pkg ||= %w[gtk+-3.0 webkit2gtk-4.1].all?  { |p| system("pkg-config --exists #{p}") } ? 'gtk+-3.0 webkit2gtk-4.1' : nil
+    pkg ||= %w[gtk+-3.0 webkit2gtk-4.0].all?  { |p| system("pkg-config --exists #{p}") } ? 'gtk+-3.0 webkit2gtk-4.0' : nil
 
     abort <<~MSG unless pkg
       [mruby-webview] no GTK + WebKitGTK development packages found via pkg-config.
@@ -99,9 +131,9 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
 
     `pkg-config --cflags #{pkg}`.strip.split(/\s+/).reject(&:empty?).each do |f|
       case f
-      when /\A-I(.+)/  then spec.cc.include_paths  << $1; spec.cxx.include_paths << $1
-      when /\A-D(.+)/  then spec.cc.defines  << $1;       spec.cxx.defines       << $1
-      else                  spec.cc.flags    << f;        spec.cxx.flags         << f
+      when /\A-I(.+)/ then spec.cc.include_paths << $1; spec.cxx.include_paths << $1
+      when /\A-D(.+)/ then spec.cc.defines       << $1; spec.cxx.defines       << $1
+      else                 spec.cc.flags         << f;  spec.cxx.flags         << f
       end
     end
 
@@ -110,13 +142,11 @@ MRuby::Gem::Specification.new('mruby-webview') do |spec|
     spec.linker.libraries << 'pthread'
   end
 
-  unless spec.cxx.flags.flatten.any? { |f| f =~ /-std=c\+\+/ }
-    if is_windows
+  if is_windows
       spec.cxx.flags << '/std:c++20'
-    else
+  else
       spec.cxx.flags << '-std=c++20'
-    end
   end
 
-  spec.bins = %w(hypha.mrb)
+  spec.bins = %w(hypha)
 end

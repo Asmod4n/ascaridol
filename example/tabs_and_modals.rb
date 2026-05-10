@@ -215,7 +215,7 @@ end
 def render_page
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>tabs + modals</title>
-    #{Webview.html_router(:route)}<style>#{CSS}</style></head>
+    #{Hypha.html_router(:route)}<style>#{CSS}</style></head>
     <body><h1>TABS + MODALS x MRUBY</h1>
     #{render_main(:projects)}
     </body></html>
@@ -267,7 +267,7 @@ def route(method, path, _params)
   end || "<p style='color:crimson'>404 #{method} #{path}</p>"
 end
 
-Webview.open(title: "tabs + modals x mruby", size: [820, 620], debug: true) do |w|
+Hypha.run(title: "tabs + modals x mruby", size: [820, 620], debug: true) do |w|
   w.bind(:route) { |m, p, params| route(m, p, params) }
   w.html = render_page
 end
