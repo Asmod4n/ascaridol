@@ -167,7 +167,7 @@ becomes ready.
 ```ruby
 Hypha.add_native_event($stdin) do |io, events|
   line = io.gets
-  Hypha.eval("console.log(#{line.to_json})")
+  Hypha.eval("console.log(#{JSON.dump(line)})")
   true   # return falsy to stop watching
 end
 ```
