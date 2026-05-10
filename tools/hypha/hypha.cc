@@ -243,11 +243,11 @@ invoke_bound_proc(mrb_state* mrb, mrb_sym name_sym, webview::webview* wv,
 
     mrb_value parsed = mrb_protect_error(mrb, bind_parse_body, &step, &err);
     if (err) {
-        mrb_value msg = mrb_funcall_id(mrb, parsed, MRB_SYM(message), 0);
+        mrb_value message = mrb_funcall_id(mrb, parsed, MRB_SYM(message), 0);
         mrb_value backtrace = mrb_funcall_id(mrb, parsed, MRB_SYM(backtrace), 0);
         wv->resolve(id, 1,
             make_error_json_str(mrb, mrb_str_new_lit(mrb, "ParseError"),
-                msg, backtrace));
+                message, backtrace));
         mrb_gc_arena_restore(mrb, ai);
         return;
     }
@@ -261,12 +261,12 @@ invoke_bound_proc(mrb_state* mrb, mrb_sym name_sym, webview::webview* wv,
     err = FALSE;
     mrb_value result = mrb_protect_error(mrb, bind_invoke_body, &step, &err);
     if (err) {
-        mrb_value msg = mrb_funcall_id(mrb, result, MRB_SYM(message), 0);
+        mrb_value message = mrb_funcall_id(mrb, result, MRB_SYM(message), 0);
         mrb_value cls = mrb_funcall_id(mrb, result, MRB_SYM(class), 0);
         mrb_value name = mrb_funcall_id(mrb, cls, MRB_SYM(name), 0);
         mrb_value backtrace = mrb_funcall_id(mrb, result, MRB_SYM(backtrace), 0);
         if (!mrb_string_p(name)) name = mrb_str_new_lit(mrb, "Error");
-        wv->resolve(id, 1, make_error_json_str(mrb, name, msg, backtrace));
+        wv->resolve(id, 1, make_error_json_str(mrb, name, message, backtrace));
         mrb_gc_arena_restore(mrb, ai);
         return;
     }
@@ -279,9 +279,6 @@ invoke_bound_proc(mrb_state* mrb, mrb_sym name_sym, webview::webview* wv,
     mrb_gc_arena_restore(mrb, ai);
 }
 
-/* hypha_bind_on_main — exposed to src/ via webview_internal.h (extern decl).
- * Registers (or replaces) a binding for name → proc. Called from the
- * dispatch lambda on main with proc reconstructed in g_main_mrb. */
 void
 hypha_bind_on_main(mrb_state* mrb, webview::webview* wv,
     mrb_sym name_sym, const std::string& name, mrb_value proc)
@@ -298,9 +295,8 @@ hypha_bind_on_main(mrb_state* mrb, webview::webview* wv,
     /* Fresh registration: hand webview a lambda that captures name_sym
      * and the wv pointer. The hidden iv hash keeps the proc alive. */
     auto err = wv->bind(name,
-        [name_sym, wv](std::string id, std::string req, void*) {
-            mrb_state* m = g_main_mrb.load(std::memory_order_acquire);
-            if (m) invoke_bound_proc(m, name_sym, wv, id, req);
+        [mrb, name_sym, wv](std::string id, std::string req, void*) {
+            invoke_bound_proc(mrb, name_sym, wv, id, req);
         },
         nullptr);
     hypha_check_result(mrb, err);
@@ -317,23 +313,6 @@ hypha_unbind_on_main(mrb_state* mrb, webview::webview* wv, mrb_sym name_sym,
     hypha_check_result(mrb, err);
 
     mrb_hash_delete_key(mrb, bindings_hash(mrb), mrb_symbol_value(name_sym));
-}
-
-/* ========================================================================= */
-/* set_size / return_result / bindings / handles                             */
-/* ========================================================================= */
-
-void
-hypha_set_size_on_main(webview::webview* wv, int w, int h, int hint)
-{
-    wv->set_size(w, h, static_cast<webview_hint_t>(hint));
-}
-
-void
-hypha_return_result_on_main(webview::webview* wv, const std::string& id,
-    int status, const std::string& result)
-{
-    wv->resolve(id, status, result);
 }
 
 mrb_value

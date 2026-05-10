@@ -10,7 +10,7 @@
  *
  *   - Methods that act on the live webview without any platform-specific
  *     work: title=, html=, url=, eval, init, terminate, set_size,
- *     return_result. Each follows the same pattern: extract args, gate
+ *     resolve. Each follows the same pattern: extract args, gate
  *     on g_wv, branch on hypha_in_main_state(mrb) — direct call on main,
  *     webview::dispatch(lambda) off main. Lambdas capture only plain
  *     C++ data (std::string, int, bool); never mrb_value, never pointers
@@ -331,9 +331,9 @@ mrb_hypha_terminate(mrb_state* mrb, mrb_value /*self*/)
     return mrb_nil_value();
 }
 
-/* Hypha.return_result(id, status, result) --------------------------------- */
+/* Hypha.resolve(id, status, result) --------------------------------- */
 static mrb_value
-mrb_hypha_return_result(mrb_state* mrb, mrb_value /*self*/)
+mrb_hypha_resolve(mrb_state* mrb, mrb_value /*self*/)
 {
     const char* id; mrb_int id_len;
     mrb_int status;
@@ -346,16 +346,7 @@ mrb_hypha_return_result(mrb_state* mrb, mrb_value /*self*/)
 
     webview::webview* wv = hypha_require_running(mrb);
 
-    if (hypha_in_main_state(mrb)) {
-        wv->resolve(id_s, st, res_s);
-    }
-    else {
-        wv->dispatch([id_s = std::move(id_s), st,
-            res_s = std::move(res_s)]() {
-                webview::webview* w = g_wv.load(std::memory_order_acquire);
-                if (w) w->resolve(id_s, st, res_s);
-            });
-    }
+    wv->resolve(id_s, st, res_s);
     return mrb_nil_value();
 }
 
@@ -375,18 +366,15 @@ mrb_hypha_dispatch(mrb_state* mrb, mrb_value /*self*/)
 
     if (hypha_in_main_state(mrb)) {
         /* fast path: yield directly with mrb_protect_error */
-        mrb_value args = mrb_ary_new_from_values(mrb, argc, argv);
 
-        struct ctx { mrb_value blk; mrb_value args; };
-        ctx c{ blk, args };
+        struct ctx { mrb_value blk; mrb_value* argv; mrb_int argc; };
+        ctx c{ blk, argv, argc };
 
         mrb_bool err = FALSE;
         mrb_protect_error(mrb,
             [](mrb_state* m, void* p) -> mrb_value {
                 ctx* c = static_cast<ctx*>(p);
-                mrb_int n = RARRAY_LEN(c->args);
-                mrb_value* a = RARRAY_PTR(c->args);
-                return mrb_yield_argv(m, c->blk, n, a);
+                return mrb_yield_argv(m, c->blk, c->argc, c->argv);
             },
             &c, &err);
 
@@ -536,8 +524,8 @@ mrb_hypha_mrb_gem_init(mrb_state* mrb)
     mrb_define_class_method_id(mrb, hypha, MRB_SYM_E(size),
         mrb_hypha_size_setter, MRB_ARGS_REQ(1));
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(return_result),
-        mrb_hypha_return_result, MRB_ARGS_REQ(3));
+    mrb_define_class_method_id(mrb, hypha, MRB_SYM(resolve),
+        mrb_hypha_resolve, MRB_ARGS_REQ(3));
 
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(terminate),
         mrb_hypha_terminate, MRB_ARGS_NONE());
