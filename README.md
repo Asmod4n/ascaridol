@@ -242,20 +242,6 @@ Supported attributes:
 Forms harvest their named fields automatically. Lone form-controls (input,
 select, textarea) contribute their name/value. `rb-vals` overrides both.
 
-## Per-platform UI
-
-Hypha exposes `Hypha.platform` (returns `:windows`, `:macos`, `:linux`, or
-`:unknown`) and sets `document.documentElement.dataset.platform` to the same
-string at page load. Use either to write platform-specific HTML/CSS:
-
-```css
-html[data-platform="macos"] [data-not-on-macos] { display: none; }
-html[data-platform="windows"] [data-only-on-macos] { display: none; }
-```
-
-Useful for menubar conventions, keyboard shortcut hints, and other places
-where platforms genuinely differ.
-
 ## Threading model
 
 mruby is single-threaded. Hypha's design assumes that, and provides one
