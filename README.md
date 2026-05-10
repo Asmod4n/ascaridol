@@ -1,6 +1,5 @@
-<p align="center">
-  <img src="hypha.svg" alt="Hypha logo" width="160">
-</p>
+<div align="center">
+  <img src="Hypha.svg" alt="Hypha" width="160" height="160">
 
 <h1 align="center">Hypha</h1>
 
@@ -74,8 +73,8 @@ Hypha ships as source. You build the `hypha` binary once, then any Hypha
 app is a Ruby script that you compile against that binary.
 
 ```sh
-git clone https://github.com/Asmod4n/mruby-webview
-cd mruby-webview
+git clone https://github.com/Asmod4n/hypha-mrb.git
+cd hypha
 rake
 ```
 
