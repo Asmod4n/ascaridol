@@ -71,4 +71,28 @@ hypha_check_result(mrb_state* mrb, const R& r)
     hypha_check(mrb, info.code(), info.message());
 }
 
+/* Run `fn(m)` on the main thread inside an mrb_protect_error frame, where  */
+/* `m` is g_main_mrb. Use from inside webview::dispatch lambdas so any      */
+/* raise from hypha_check_result longjmps into the local frame instead of  */
+/* unwinding through webview::run(). On error, prints + clears mrb->exc.    */
+template <typename F>
+inline void
+hypha_protect_on_main(F fn)
+{
+    mrb_state* m = g_main_mrb.load(std::memory_order_acquire);
+    if (!m) return;
+
+    mrb_bool err = FALSE;
+    mrb_protect_error(m,
+        [](mrb_state* mm, void* p) -> mrb_value {
+            (*static_cast<F*>(p))(mm);
+            return mrb_nil_value();
+        },
+        &fn, &err);
+    if (err) {
+        mrb_print_error(m);
+        m->exc = nullptr;
+    }
+}
+
 #endif /* MRUBY_WEBVIEW_INTERNAL_H */

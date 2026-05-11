@@ -183,8 +183,9 @@ mrb_hypha_set_title(mrb_state* mrb, mrb_value /*self*/)
         wv->dispatch([title = std::move(title)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
-                               w->set_title(title));
+            hypha_protect_on_main([&](mrb_state* m) {
+                hypha_check_result(m, w->set_title(title));
+            });
             });
     }
     return mrb_nil_value();
@@ -207,8 +208,9 @@ mrb_hypha_set_html(mrb_state* mrb, mrb_value /*self*/)
         wv->dispatch([html = std::move(html)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
-                               w->set_html(html));
+            hypha_protect_on_main([&](mrb_state* m) {
+                hypha_check_result(m, w->set_html(html));
+            });
             });
     }
     return mrb_nil_value();
@@ -231,8 +233,9 @@ mrb_hypha_navigate(mrb_state* mrb, mrb_value /*self*/)
         wv->dispatch([url = std::move(url)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
-                               w->navigate(url));
+            hypha_protect_on_main([&](mrb_state* m) {
+                hypha_check_result(m, w->navigate(url));
+            });
             });
     }
     return mrb_nil_value();
@@ -255,8 +258,9 @@ mrb_hypha_eval(mrb_state* mrb, mrb_value /*self*/)
         wv->dispatch([js = std::move(js)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
-                               w->eval(js));
+            hypha_protect_on_main([&](mrb_state* m) {
+                hypha_check_result(m, w->eval(js));
+            });
             });
     }
     return mrb_nil_value();
@@ -279,8 +283,9 @@ mrb_hypha_init(mrb_state* mrb, mrb_value /*self*/)
         wv->dispatch([js = std::move(js)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
-                               w->init(js));
+            hypha_protect_on_main([&](mrb_state* m) {
+                hypha_check_result(m, w->init(js));
+            });
             });
     }
     return mrb_nil_value();
@@ -324,8 +329,9 @@ mrb_hypha_set_size(mrb_state* mrb, mrb_value /*self*/)
         wv->dispatch([wi, hi, hint]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
-                               w->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
+            hypha_protect_on_main([&](mrb_state* m) {
+                hypha_check_result(m, w->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
+            });
             });
     }
     return mrb_nil_value();
@@ -363,8 +369,9 @@ mrb_hypha_size_setter(mrb_state* mrb, mrb_value self)
         wv->dispatch([wi, hi, hint]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
-                               w->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
+            hypha_protect_on_main([&](mrb_state* m) {
+                hypha_check_result(m, w->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
+            });
             });
     }
     return self;
@@ -383,8 +390,9 @@ mrb_hypha_terminate(mrb_state* mrb, mrb_value /*self*/)
         wv->dispatch([]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
-                               w->terminate());
+            hypha_protect_on_main([&](mrb_state* m) {
+                hypha_check_result(m, w->terminate());
+            });
             });
     }
     return mrb_nil_value();
