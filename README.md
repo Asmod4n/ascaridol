@@ -45,16 +45,6 @@ local data viewers, dashboards over local services, dev tools, internal
 utilities, hobby apps. Anything where the alternative would have been
 "build a tiny web server and tell users to open localhost in their browser."
 
-## When this is the wrong tool
-
-If you need pixel-perfect native widgets, deep accessibility integration,
-serious offline-first functionality at scale, or you're shipping to people
-who'll evaluate you against Electron's polish, look elsewhere. Tauri is good.
-Wails is good. Even Electron, despite the size, is mature.
-
-Hypha is for the case where you'd otherwise be hand-rolling a webview wrapper
-and you'd rather use a battle-tested one.
-
 ## Status
 
 **v0.1.** Genuinely usable, not yet polished. The threading model is sound,
