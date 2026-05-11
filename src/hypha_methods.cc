@@ -285,8 +285,8 @@ mrb_hypha_size_setter(mrb_state* mrb, mrb_value self)
     mrb_int n = RARRAY_LEN(ary);
     if (n < 2 || n > 3) {
         mrb_raisef(mrb, E_ARGUMENT_ERROR,
-            "Hypha.size= expects [w, h] or [w, h, hint], got %d elements",
-            (int)n);
+            "Hypha.size= expects [w, h] or [w, h, hint], got %i elements",
+            n);
     }
     mrb_value w_v = mrb_ary_ref(mrb, ary, 0);
     mrb_value h_v = mrb_ary_ref(mrb, ary, 1);

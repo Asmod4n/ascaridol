@@ -323,13 +323,7 @@ hypha_bindings_on_main(mrb_state* mrb)
         MRB_SYM(bindings));
     if (!mrb_hash_p(bh)) return mrb_ary_new(mrb);
 
-    mrb_value keys = mrb_hash_keys(mrb, bh);
-    mrb_int len = RARRAY_LEN(keys);
-    mrb_value result = mrb_ary_new_capa(mrb, len);
-    for (mrb_int i = 0; i < len; i++) {
-        mrb_ary_push(mrb, result, mrb_ary_ref(mrb, keys, i));
-    }
-    return result;
+    return mrb_hash_keys(mrb, bh);;
 }
 
 mrb_value
@@ -1086,8 +1080,23 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
         }
     }
 
-    /* Block here until terminate() is called or the window closes. */
-    auto run_result = wv->run();
+/* Block here until terminate() is called or the window closes.
+     * mruby code runs inside callbacks during run(); a raise from any
+     * of it would longjmp past our cleanup and leak the webview. */
+    using run_result_t = decltype(wv->run());
+    run_result_t run_result{};
+
+    struct ctx { webview::webview* wv; run_result_t* out; };
+    ctx c{ wv, &run_result };
+
+    mrb_bool run_err = FALSE;
+    mrb_protect_error(mrb,
+        [](mrb_state* m, void* p) -> mrb_value {
+            ctx* c = static_cast<ctx*>(p);
+            *c->out = c->wv->run();
+            return mrb_nil_value();
+        },
+        &c, &run_err);
 
     /* Shutdown: clear g_wv (release) before destroying so any in-flight
      * worker dispatches see null and bail out. webview's destructor
@@ -1095,6 +1104,13 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
      * run on main with g_wv still set — safe. */
     g_wv.store(nullptr, std::memory_order_release);
     delete wv;
+
+    if (run_err) {
+        mrb_value exc = mrb_obj_value(mrb->exc);
+        mrb->exc = nullptr;
+        mrb_exc_raise(mrb, exc);
+        return mrb_nil_value();   /* unreachable */
+    }
 
     hypha_check_result(mrb, run_result);
     return self;
