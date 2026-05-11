@@ -72,6 +72,49 @@ std::atomic<mrb_state*>        g_main_mrb{ nullptr };
 std::atomic<webview::webview*> g_wv{ nullptr };
 
 /* ========================================================================= */
+/* Error helpers — definitions for declarations in webview_internal.h.        */
+/* Live here so they sit in libmruby.lib (same TU as the globals).            */
+/* ========================================================================= */
+
+struct RClass*
+hypha_error_class(mrb_state* mrb, webview_error_t err)
+{
+    struct RClass* base = mrb_module_get_id(mrb, MRB_SYM(Hypha));
+    mrb_sym name;
+    switch (err) {
+        case WEBVIEW_ERROR_MISSING_DEPENDENCY: name = MRB_SYM(MissingDependencyError); break;
+        case WEBVIEW_ERROR_CANCELED:           name = MRB_SYM(CanceledError);          break;
+        case WEBVIEW_ERROR_INVALID_STATE:      name = MRB_SYM(InvalidStateError);      break;
+        case WEBVIEW_ERROR_INVALID_ARGUMENT:   name = MRB_SYM(InvalidArgumentError);   break;
+        case WEBVIEW_ERROR_DUPLICATE:          name = MRB_SYM(DuplicateError);         break;
+        case WEBVIEW_ERROR_NOT_FOUND:          name = MRB_SYM(NotFoundError);          break;
+        case WEBVIEW_ERROR_UNSPECIFIED:
+        default:                               name = MRB_SYM(Error);                  break;
+    }
+    return mrb_class_get_under_id(mrb, base, name);
+}
+
+void
+hypha_check(mrb_state* mrb, webview_error_t code, const std::string& msg)
+{
+    if (code == WEBVIEW_ERROR_OK) return;
+    if (!mrb) return;   /* no caller to raise to (shutdown race) */
+    const char* fallback;
+    switch (code) {
+        case WEBVIEW_ERROR_MISSING_DEPENDENCY: fallback = "missing dependency"; break;
+        case WEBVIEW_ERROR_CANCELED:           fallback = "operation canceled"; break;
+        case WEBVIEW_ERROR_INVALID_STATE:      fallback = "invalid state"; break;
+        case WEBVIEW_ERROR_INVALID_ARGUMENT:   fallback = "invalid argument"; break;
+        case WEBVIEW_ERROR_DUPLICATE:          fallback = "duplicate"; break;
+        case WEBVIEW_ERROR_NOT_FOUND:          fallback = "not found"; break;
+        case WEBVIEW_ERROR_UNSPECIFIED:
+        default:                               fallback = "unspecified error"; break;
+    }
+    mrb_raise(mrb, hypha_error_class(mrb, code),
+              msg.empty() ? fallback : msg.c_str());
+}
+
+/* ========================================================================= */
 /* Gate                                                                      */
 /* ========================================================================= */
 
@@ -134,12 +177,14 @@ mrb_hypha_set_title(mrb_state* mrb, mrb_value /*self*/)
     webview::webview* wv = hypha_require_running(mrb);
 
     if (hypha_in_main_state(mrb)) {
-        wv->set_title(title);
+        hypha_check_result(mrb, wv->set_title(title));
     }
     else {
         wv->dispatch([title = std::move(title)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
-            if (w) w->set_title(title);
+            if (!w) return;
+            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
+                               w->set_title(title));
             });
     }
     return mrb_nil_value();
@@ -156,12 +201,14 @@ mrb_hypha_set_html(mrb_state* mrb, mrb_value /*self*/)
     webview::webview* wv = hypha_require_running(mrb);
 
     if (hypha_in_main_state(mrb)) {
-        wv->set_html(html);
+        hypha_check_result(mrb, wv->set_html(html));
     }
     else {
         wv->dispatch([html = std::move(html)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
-            if (w) w->set_html(html);
+            if (!w) return;
+            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
+                               w->set_html(html));
             });
     }
     return mrb_nil_value();
@@ -178,12 +225,14 @@ mrb_hypha_navigate(mrb_state* mrb, mrb_value /*self*/)
     webview::webview* wv = hypha_require_running(mrb);
 
     if (hypha_in_main_state(mrb)) {
-        wv->navigate(url);
+        hypha_check_result(mrb, wv->navigate(url));
     }
     else {
         wv->dispatch([url = std::move(url)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
-            if (w) w->navigate(url);
+            if (!w) return;
+            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
+                               w->navigate(url));
             });
     }
     return mrb_nil_value();
@@ -200,12 +249,14 @@ mrb_hypha_eval(mrb_state* mrb, mrb_value /*self*/)
     webview::webview* wv = hypha_require_running(mrb);
 
     if (hypha_in_main_state(mrb)) {
-        wv->eval(js);
+        hypha_check_result(mrb, wv->eval(js));
     }
     else {
         wv->dispatch([js = std::move(js)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
-            if (w) w->eval(js);
+            if (!w) return;
+            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
+                               w->eval(js));
             });
     }
     return mrb_nil_value();
@@ -222,12 +273,14 @@ mrb_hypha_init(mrb_state* mrb, mrb_value /*self*/)
     webview::webview* wv = hypha_require_running(mrb);
 
     if (hypha_in_main_state(mrb)) {
-        wv->init(js);
+        hypha_check_result(mrb, wv->init(js));
     }
     else {
         wv->dispatch([js = std::move(js)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
-            if (w) w->init(js);
+            if (!w) return;
+            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
+                               w->init(js));
             });
     }
     return mrb_nil_value();
@@ -265,12 +318,14 @@ mrb_hypha_set_size(mrb_state* mrb, mrb_value /*self*/)
     int hi = static_cast<int>(h);
 
     if (hypha_in_main_state(mrb)) {
-        wv->set_size(wi, hi, static_cast<webview_hint_t>(hint));
+        hypha_check_result(mrb, wv->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
     }
     else {
         wv->dispatch([wi, hi, hint]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
-            if (w) w->set_size(wi, hi, static_cast<webview_hint_t>(hint));
+            if (!w) return;
+            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
+                               w->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
             });
     }
     return mrb_nil_value();
@@ -302,12 +357,14 @@ mrb_hypha_size_setter(mrb_state* mrb, mrb_value self)
     int hi = static_cast<int>(h);
 
     if (hypha_in_main_state(mrb)) {
-        wv->set_size(wi, hi, static_cast<webview_hint_t>(hint));
+        hypha_check_result(mrb, wv->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
     }
     else {
         wv->dispatch([wi, hi, hint]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
-            if (w) w->set_size(wi, hi, static_cast<webview_hint_t>(hint));
+            if (!w) return;
+            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
+                               w->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
             });
     }
     return self;
@@ -320,12 +377,14 @@ mrb_hypha_terminate(mrb_state* mrb, mrb_value /*self*/)
     webview::webview* wv = hypha_require_running(mrb);
 
     if (hypha_in_main_state(mrb)) {
-        wv->terminate();
+        hypha_check_result(mrb, wv->terminate());
     }
     else {
         wv->dispatch([]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
-            if (w) w->terminate();
+            if (!w) return;
+            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
+                               w->terminate());
             });
     }
     return mrb_nil_value();
@@ -346,7 +405,7 @@ mrb_hypha_resolve(mrb_state* mrb, mrb_value /*self*/)
 
     webview::webview* wv = hypha_require_running(mrb);
 
-    wv->resolve(id_s, st, res_s);
+    hypha_check_result(mrb, wv->resolve(id_s, st, res_s));
     return mrb_nil_value();
 }
 

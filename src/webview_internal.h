@@ -44,4 +44,31 @@ hypha_in_main_state(mrb_state* caller_mrb)
     return caller_mrb == g_main_mrb.load(std::memory_order_acquire);
 }
 
+/* ========================================================================= */
+/* Error helpers — translate webview_error_t -> Hypha::<XxxError>.           */
+/*                                                                           */
+/* hypha_error_class    : resolve subclass; falls back to Hypha::Error.      */
+/* hypha_check          : raise unless code == WEBVIEW_ERROR_OK.             */
+/* hypha_check_result   : for webview's `result<T>`; raises on !ok().        */
+/*                                                                           */
+/* In dispatched lambdas, pass g_main_mrb.load() as the mrb argument: the    */
+/* worker's mrb is gone by the time the lambda lands on main.                */
+/* ========================================================================= */
+#include <mruby/class.h>
+#include <mruby/error.h>
+#include <mruby/presym.h>
+#include <string>
+
+struct RClass* hypha_error_class(mrb_state* mrb, webview_error_t err);
+void           hypha_check(mrb_state* mrb, webview_error_t code, const std::string& msg);
+
+template <typename R>
+void
+hypha_check_result(mrb_state* mrb, const R& r)
+{
+    if (r.ok()) return;
+    const auto& info = r.error();
+    hypha_check(mrb, info.code(), info.message());
+}
+
 #endif /* MRUBY_WEBVIEW_INTERNAL_H */

@@ -91,51 +91,6 @@ static bool g_hypha_used = false;
 
 MRB_CPP_DEFINE_TYPE(webview::webview, Webview)
 
-static struct RClass*
-hypha_error_class(mrb_state* mrb, webview_error_t err)
-{
-    struct RClass* base = mrb_module_get_id(mrb, MRB_SYM(Hypha));
-    mrb_sym name;
-    switch (err) {
-    case WEBVIEW_ERROR_MISSING_DEPENDENCY: name = MRB_SYM(MissingDependencyError); break;
-    case WEBVIEW_ERROR_CANCELED:           name = MRB_SYM(CanceledError);          break;
-    case WEBVIEW_ERROR_INVALID_STATE:      name = MRB_SYM(InvalidStateError);      break;
-    case WEBVIEW_ERROR_INVALID_ARGUMENT:   name = MRB_SYM(InvalidArgumentError);   break;
-    case WEBVIEW_ERROR_DUPLICATE:          name = MRB_SYM(DuplicateError);         break;
-    case WEBVIEW_ERROR_NOT_FOUND:          name = MRB_SYM(NotFoundError);          break;
-    case WEBVIEW_ERROR_UNSPECIFIED:
-    default:                               name = MRB_SYM(Error);                  break;
-    }
-    return mrb_class_get_under_id(mrb, base, name);
-}
-
-static void
-hypha_check(mrb_state* mrb, webview_error_t code, const std::string& msg)
-{
-    if (code == WEBVIEW_ERROR_OK) return;
-    const char* fallback;
-    switch (code) {
-    case WEBVIEW_ERROR_MISSING_DEPENDENCY: fallback = "missing dependency"; break;
-    case WEBVIEW_ERROR_CANCELED:           fallback = "operation canceled"; break;
-    case WEBVIEW_ERROR_INVALID_STATE:      fallback = "invalid state"; break;
-    case WEBVIEW_ERROR_INVALID_ARGUMENT:   fallback = "invalid argument"; break;
-    case WEBVIEW_ERROR_DUPLICATE:          fallback = "duplicate"; break;
-    case WEBVIEW_ERROR_NOT_FOUND:          fallback = "not found"; break;
-    case WEBVIEW_ERROR_UNSPECIFIED:
-    default:                               fallback = "unspecified error"; break;
-    }
-    mrb_raise(mrb, hypha_error_class(mrb, code),
-        msg.empty() ? fallback : msg.c_str());
-}
-
-template <typename R>
-static void
-hypha_check_result(mrb_state* mrb, const R& r)
-{
-    if (r.ok()) return;
-    const auto& info = r.error();
-    hypha_check(mrb, info.code(), info.message());
-}
 
 /* ========================================================================= */
 /* Bind machinery                                                            */
@@ -997,7 +952,7 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
 
     /* Apply kwargs synchronously (we're on main, no dispatch needed). */
     if (mrb_string_p(kw_title)) {
-        wv->set_title(to_std_string(kw_title));
+        hypha_check_result(mrb, wv->set_title(to_std_string(kw_title)));
     }
     if (mrb_array_p(kw_size)) {
         mrb_int n = RARRAY_LEN(kw_size);
@@ -1010,16 +965,16 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
         webview_hint_t hint = (n == 3)
             ? hint_from_kw(mrb, mrb_ary_ref(mrb, kw_size, 2))
             : WEBVIEW_HINT_NONE;
-        wv->set_size((int)w, (int)h, hint);
+        hypha_check_result(mrb, wv->set_size((int)w, (int)h, hint));
     }
     if (mrb_string_p(kw_init)) {
-        wv->init(to_std_string(kw_init));
+        hypha_check_result(mrb, wv->init(to_std_string(kw_init)));
     }
     if (mrb_string_p(kw_html)) {
-        wv->set_html(to_std_string(kw_html));
+        hypha_check_result(mrb, wv->set_html(to_std_string(kw_html)));
     }
     else if (mrb_string_p(kw_url)) {
-        wv->navigate(to_std_string(kw_url));
+        hypha_check_result(mrb, wv->navigate(to_std_string(kw_url)));
     }
 
     /* Win32: attach default menu and icon now that the HWND is real. */
