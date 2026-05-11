@@ -149,6 +149,18 @@ Ruby become rejected promises with a real `Error` object on the JS side
 block. Workers should send work to existing bindings via `Hypha.dispatch`,
 not register new ones.
 
+### `Hypha.resolve(id, &blk)`
+
+Resolve a pending `bind_async` call. The block's return value is JSON-encoded and shipped to JS; if it raises, the promise rejects with `{name, message, backtrace}`. Safe from any thread — dispatches onto main automatically.
+
+```ruby
+Hypha.bind_async(:later) { |id| @pending = id }
+# ...later, from anywhere:
+Hypha.resolve(@pending) { "done" }
+```
+
+See [`example/bind_async.rb`](example/bind_async.rb) for a full stdin-as-a-promise example, including EOF handling and a queue that pairs JS-side waiters with buffered lines.
+
 ### `Hypha.add_native_event(io, &blk)`
 
 Watch a file descriptor on the main run loop. The block fires when the fd
@@ -323,7 +335,7 @@ mruby-webview/
 
 The split between `src/` and `tools/hypha/` is meaningful: `src/` lives in
 `libmruby.lib` and is linkable by other binaries (which see Hypha methods
-that all raise "Hypha is not running"); `tools/hypha/` only links into the
+that all raise "Hypha is not running" until you start Hypha with Hypha.run); `tools/hypha/` only links into the
 `hypha` binary and provides the actual runtime.
 
 ## License
