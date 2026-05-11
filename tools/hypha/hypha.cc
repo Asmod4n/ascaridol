@@ -1114,7 +1114,7 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
         ctx c{ blk, hypha_module };
 
         mrb_bool err = FALSE;
-        mrb_protect_error(mrb,
+        mrb_value exc = mrb_protect_error(mrb,
             [](mrb_state* m, void* p) -> mrb_value {
                 ctx* c = static_cast<ctx*>(p);
                 return mrb_yield_argv(m, c->blk, 1, &c->arg);
@@ -1123,12 +1123,18 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
 
         if (err) {
             /* Setup-block error: tear down webview and re-raise so the
-             * user sees the real error without the run loop ever starting. */
-            mrb_value exc = mrb_obj_value(mrb->exc);
-            mrb->exc = nullptr;
+             * user sees the real error without the run loop ever starting.
+             * mrb_protect_error clears mrb->exc and hands the exception back
+             * via the return value; use that, not mrb->exc. */
             g_wv.store(nullptr, std::memory_order_release);
             delete wv;
-            mrb_exc_raise(mrb, exc);
+            if (mrb_obj_is_kind_of(mrb, exc, mrb->eException_class)) {
+                mrb_exc_raise(mrb, exc);
+            }
+            else {
+                mrb_raise(mrb, E_RUNTIME_ERROR,
+                    "Hypha.run setup block raised a non-exception value");
+            }
             return mrb_nil_value();   /* unreachable */
         }
     }
@@ -1143,7 +1149,7 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
         ctx c{ hook };
 
         mrb_bool err = FALSE;
-        mrb_protect_error(mrb,
+        mrb_value exc = mrb_protect_error(mrb,
             [](mrb_state* m, void* p) -> mrb_value {
                 ctx* c = static_cast<ctx*>(p);
                 return mrb_yield_argv(m, c->blk, 0, nullptr);
@@ -1151,11 +1157,15 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
             &c, &err);
 
         if (err) {
-            mrb_value exc = mrb_obj_value(mrb->exc);
-            mrb->exc = nullptr;
             g_wv.store(nullptr, std::memory_order_release);
             delete wv;
-            mrb_exc_raise(mrb, exc);
+            if (mrb_obj_is_kind_of(mrb, exc, mrb->eException_class)) {
+                mrb_exc_raise(mrb, exc);
+            }
+            else {
+                mrb_raise(mrb, E_RUNTIME_ERROR,
+                    "Hypha.ready hook raised a non-exception value");
+            }
             return mrb_nil_value();   /* unreachable */
         }
     }
@@ -1170,7 +1180,7 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
     ctx c{ wv, &run_result };
 
     mrb_bool run_err = FALSE;
-    mrb_protect_error(mrb,
+    mrb_value run_exc = mrb_protect_error(mrb,
         [](mrb_state* m, void* p) -> mrb_value {
             ctx* c = static_cast<ctx*>(p);
             *c->out = c->wv->run();
@@ -1186,9 +1196,13 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
     delete wv;
 
     if (run_err) {
-        mrb_value exc = mrb_obj_value(mrb->exc);
-        mrb->exc = nullptr;
-        mrb_exc_raise(mrb, exc);
+        if (mrb_obj_is_kind_of(mrb, run_exc, mrb->eException_class)) {
+            mrb_exc_raise(mrb, run_exc);
+        }
+        else {
+            mrb_raise(mrb, E_RUNTIME_ERROR,
+                "Hypha run loop raised a non-exception value");
+        }
         return mrb_nil_value();   /* unreachable */
     }
 

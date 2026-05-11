@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\mrb_webview.cc">
+    <ClCompile Include="src\hypha_methods.cc">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="vendor\webview\core\src\webview.cc">
@@ -269,7 +269,7 @@
     <ClInclude Include="vendor\webview\test_driver\include\webview\test_driver.hh">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\mrb_webview.h">
+    <ClInclude Include="src\webview_internal.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

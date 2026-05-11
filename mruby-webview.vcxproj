@@ -119,7 +119,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\mrb_webview.cc" />
+    <ClCompile Include="src\hypha_methods.cc" />
     <ClCompile Include="vendor\webview\core\src\webview.cc" />
     <ClCompile Include="vendor\webview\core\tests\src\functional_tests.cc" />
     <ClCompile Include="vendor\webview\core\tests\src\unit_tests.cc" />
@@ -133,7 +133,7 @@
     <ClCompile Include="vendor\webview\test_driver\src\test_driver.cc" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\mrb_webview.h" />
+    <ClInclude Include="src\webview_internal.h" />
     <ClInclude Include="vendor\webview\compatibility\mingw\include\EventToken.h" />
     <ClInclude Include="vendor\webview\core\include\webview.h" />
     <ClInclude Include="vendor\webview\core\include\webview\api.h" />

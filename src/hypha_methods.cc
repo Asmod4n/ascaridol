@@ -515,14 +515,17 @@ mrb_hypha_dispatch(mrb_state* mrb, mrb_value /*self*/)
         ctx c{ blk, argv, argc };
 
         mrb_bool err = FALSE;
-        mrb_protect_error(mrb,
+        mrb_value exc = mrb_protect_error(mrb,
             [](mrb_state* m, void* p) -> mrb_value {
                 ctx* c = static_cast<ctx*>(p);
                 return mrb_yield_argv(m, c->blk, c->argc, c->argv);
             },
             &c, &err);
 
-        if (err) {
+        if (err && mrb_obj_is_kind_of(mrb, exc, mrb->eException_class)) {
+            /* protect cleared mrb->exc; restore from return value so
+             * mrb_print_error has a real exception to walk. */
+            mrb->exc = mrb_obj_ptr(exc);
             mrb_print_error(mrb);
             mrb->exc = nullptr;
         }
@@ -564,7 +567,7 @@ mrb_hypha_dispatch(mrb_state* mrb, mrb_value /*self*/)
             ctx c{ proc, args };
 
             mrb_bool err = FALSE;
-            mrb_protect_error(m,
+            mrb_value exc = mrb_protect_error(m,
                 [](mrb_state* mm, void* p) -> mrb_value {
                     ctx* c = static_cast<ctx*>(p);
                     return mrb_yield_argv(mm, c->proc,
@@ -573,7 +576,8 @@ mrb_hypha_dispatch(mrb_state* mrb, mrb_value /*self*/)
                 },
                 &c, &err);
 
-            if (err) {
+            if (err && mrb_obj_is_kind_of(m, exc, m->eException_class)) {
+                m->exc = mrb_obj_ptr(exc);
                 mrb_print_error(m);
                 m->exc = nullptr;
             }
