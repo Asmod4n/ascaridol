@@ -50,6 +50,7 @@
 #include <mruby/value.h>
 #include <mruby/variable.h>
 #include <mruby/cbor.h>
+#include <mruby/fast_json.h>
 
 #include <webview/webview.h>
 
@@ -398,22 +399,98 @@ mrb_hypha_terminate(mrb_state* mrb, mrb_value /*self*/)
     return mrb_nil_value();
 }
 
-/* Hypha.resolve(id, status, result) --------------------------------- */
+/* Hypha.resolve(id) { ... } — run block, JSON-encode the result, ship to */
+/* main and call wv->resolve. If the block raises, encode the exception as */
+/* {name, message, backtrace} and resolve with status=1. The JSON-dump step */
+/* itself is also protected (circular refs etc.) and falls back to a       */
+/* generic error if it fails.                                              */
+/*                                                                          */
+/* Safe to call from a worker mrb: the block runs synchronously on the     */
+/* caller's mrb, the resulting bytes get dispatched to main as std::string.*/
 static mrb_value
 mrb_hypha_resolve(mrb_state* mrb, mrb_value /*self*/)
 {
-    const char* id; mrb_int id_len;
-    mrb_int status;
-    const char* result; mrb_int result_len;
-    mrb_get_args(mrb, "sis", &id, &id_len, &status, &result, &result_len);
+    const char* id_p; mrb_int id_len;
+    mrb_value blk = mrb_nil_value();
+    mrb_get_args(mrb, "s&", &id_p, &id_len, &blk);
+    if (mrb_nil_p(blk)) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "Hypha.resolve requires a block");
+    }
 
-    std::string id_s(id, static_cast<size_t>(id_len));
-    std::string res_s(result, static_cast<size_t>(result_len));
-    int st = static_cast<int>(status);
+    std::string id_s(id_p, static_cast<size_t>(id_len));
 
     webview::webview* wv = hypha_require_running(mrb);
 
-    hypha_check_result(mrb, wv->resolve(id_s, st, res_s));
+    int ai = mrb_gc_arena_save(mrb);
+
+    /* Run the user block. */
+    struct invoke_ctx { mrb_value blk; };
+    invoke_ctx ic{ blk };
+    mrb_bool err = FALSE;
+    mrb_value result = mrb_protect_error(mrb,
+        [](mrb_state* m, void* p) -> mrb_value {
+            invoke_ctx* c = static_cast<invoke_ctx*>(p);
+            return mrb_yield_argv(m, c->blk, 0, nullptr);
+        },
+        &ic, &err);
+
+    int status;
+    mrb_value to_dump;
+
+    if (err) {
+        /* result is the caught exception. */
+        status = 1;
+        mrb_value cls = mrb_funcall_id(mrb, result, MRB_SYM(class), 0);
+        mrb_value name_v = mrb_funcall_id(mrb, cls, MRB_SYM(name), 0);
+        if (!mrb_string_p(name_v)) name_v = mrb_str_new_lit(mrb, "Error");
+        mrb_value msg_v = mrb_funcall_id(mrb, result, MRB_SYM(message), 0);
+        mrb_value bt_v = mrb_funcall_id(mrb, result, MRB_SYM(backtrace), 0);
+
+        to_dump = mrb_hash_new_capa(mrb, 3);
+        mrb_hash_set(mrb, to_dump, mrb_symbol_value(MRB_SYM(name)), name_v);
+        mrb_hash_set(mrb, to_dump, mrb_symbol_value(MRB_SYM(message)), msg_v);
+        mrb_hash_set(mrb, to_dump, mrb_symbol_value(MRB_SYM(backtrace)),
+            mrb_array_p(bt_v) ? bt_v : mrb_ary_new(mrb));
+    }
+    else {
+        status = 0;
+        to_dump = result;
+    }
+
+    /* JSON-encode, also under protect (circular refs / unencodable types). */
+    struct dump_ctx { mrb_value v; };
+    dump_ctx dc{ to_dump };
+    mrb_bool dump_err = FALSE;
+    mrb_value json_v = mrb_protect_error(mrb,
+        [](mrb_state* m, void* p) -> mrb_value {
+            dump_ctx* d = static_cast<dump_ctx*>(p);
+            return mrb_json_dump(m, d->v);
+        },
+        &dc, &dump_err);
+
+    std::string json;
+    if (dump_err) {
+        status = 1;
+        json = "{\"name\":\"Error\",\"message\":\"failed to serialize result\"}";
+    }
+    else {
+        json.assign(RSTRING_PTR(json_v), static_cast<size_t>(RSTRING_LEN(json_v)));
+    }
+
+    mrb_gc_arena_restore(mrb, ai);
+
+    if (hypha_in_main_state(mrb)) {
+        hypha_check_result(mrb, wv->resolve(id_s, status, json));
+    }
+    else {
+        wv->dispatch([id_s = std::move(id_s), status, json = std::move(json)]() {
+            webview::webview* w = g_wv.load(std::memory_order_acquire);
+            if (!w) return;
+            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
+                               w->resolve(id_s, status, json));
+        });
+    }
+
     return mrb_nil_value();
 }
 
@@ -607,7 +684,7 @@ mrb_hypha_mrb_gem_init(mrb_state* mrb)
         mrb_hypha_size_setter, MRB_ARGS_REQ(1));
 
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(resolve),
-        mrb_hypha_resolve, MRB_ARGS_REQ(3));
+        mrb_hypha_resolve, MRB_ARGS_REQ(1) | MRB_ARGS_BLOCK());
 
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(terminate),
         mrb_hypha_terminate, MRB_ARGS_NONE());

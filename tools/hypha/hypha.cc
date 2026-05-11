@@ -114,6 +114,23 @@ bindings_hash(mrb_state* mrb)
     return h;
 }
 
+/* Parallel registry for bind_async: name_sym -> proc. The proc gets
+ * (id, *args) when invoked from JS and is expected to eventually call
+ * Hypha.resolve(id) { ... } (possibly much later, possibly from a worker
+ * mrb). If it raises before doing so, we auto-resolve with error JSON
+ * so the JS-side promise doesn't hang forever. */
+static mrb_value
+async_bindings_hash(mrb_state* mrb)
+{
+    mrb_value hypha = mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(Hypha)));
+    mrb_value h = mrb_iv_get(mrb, hypha, MRB_SYM(async_bindings));
+    if (!mrb_hash_p(h)) {
+        h = mrb_hash_new(mrb);
+        mrb_iv_set(mrb, hypha, MRB_SYM(async_bindings), h);
+    }
+    return h;
+}
+
 struct bind_step {
     mrb_value src;
     mrb_value proc;
@@ -234,6 +251,74 @@ invoke_bound_proc(mrb_state* mrb, mrb_sym name_sym, webview::webview* wv,
     mrb_gc_arena_restore(mrb, ai);
 }
 
+/* Async variant: yields (id, *args) to the proc and does NOT auto-resolve  */
+/* on success. The proc is expected to call Hypha.resolve(id) { ... }       */
+/* itself. We still auto-resolve on parse or raise — otherwise the JS-side  */
+/* promise would hang forever. */
+static void
+invoke_bound_proc_async(mrb_state* mrb, mrb_sym name_sym, webview::webview* wv,
+    const std::string& id, const std::string& req)
+{
+    int ai = mrb_gc_arena_save(mrb);
+
+    mrb_value proc = mrb_hash_fetch(mrb, async_bindings_hash(mrb),
+        mrb_symbol_value(name_sym),
+        mrb_undef_value());
+    if (!mrb_proc_p(proc)) {
+        wv->resolve(id, 1,
+            "{\"name\":\"Error\",\"message\":\"binding not registered\"}");
+        mrb_gc_arena_restore(mrb, ai);
+        return;
+    }
+
+    bind_step step;
+    step.src = str_from(mrb, req);
+    step.proc = proc;
+    step.parsed = mrb_nil_value();
+    step.result = mrb_nil_value();
+    mrb_bool err = FALSE;
+
+    mrb_value parsed = mrb_protect_error(mrb, bind_parse_body, &step, &err);
+    if (err) {
+        mrb_value message = mrb_funcall_id(mrb, parsed, MRB_SYM(message), 0);
+        mrb_value backtrace = mrb_funcall_id(mrb, parsed, MRB_SYM(backtrace), 0);
+        wv->resolve(id, 1,
+            make_error_json_str(mrb, mrb_str_new_lit(mrb, "ParseError"),
+                message, backtrace));
+        mrb_gc_arena_restore(mrb, ai);
+        return;
+    }
+    if (!mrb_array_p(parsed)) {
+        mrb_value tmp = mrb_ary_new_capa(mrb, 1);
+        mrb_ary_push(mrb, tmp, parsed);
+        parsed = tmp;
+    }
+
+    /* Prepend id_str so the block signature is (id, *args). */
+    mrb_value id_str = mrb_str_new(mrb, id.data(), id.size());
+    mrb_value args_with_id = mrb_ary_new_capa(mrb, RARRAY_LEN(parsed) + 1);
+    mrb_ary_push(mrb, args_with_id, id_str);
+    for (mrb_int i = 0; i < RARRAY_LEN(parsed); i++) {
+        mrb_ary_push(mrb, args_with_id, mrb_ary_ref(mrb, parsed, i));
+    }
+    step.parsed = args_with_id;
+
+    err = FALSE;
+    mrb_value result = mrb_protect_error(mrb, bind_invoke_body, &step, &err);
+    if (err) {
+        mrb_value message = mrb_funcall_id(mrb, result, MRB_SYM(message), 0);
+        mrb_value cls = mrb_funcall_id(mrb, result, MRB_SYM(class), 0);
+        mrb_value name = mrb_funcall_id(mrb, cls, MRB_SYM(name), 0);
+        mrb_value backtrace = mrb_funcall_id(mrb, result, MRB_SYM(backtrace), 0);
+        if (!mrb_string_p(name)) name = mrb_str_new_lit(mrb, "Error");
+        wv->resolve(id, 1, make_error_json_str(mrb, name, message, backtrace));
+        mrb_gc_arena_restore(mrb, ai);
+        return;
+    }
+    /* No resolve on success — user's block will call Hypha.resolve. */
+    mrb_gc_arena_restore(mrb, ai);
+}
+
 void
 hypha_bind_on_main(mrb_state* mrb, webview::webview* wv,
     mrb_sym name_sym, const std::string& name, mrb_value proc)
@@ -260,25 +345,65 @@ hypha_bind_on_main(mrb_state* mrb, webview::webview* wv,
 }
 
 void
+hypha_bind_async_on_main(mrb_state* mrb, webview::webview* wv,
+    mrb_sym name_sym, const std::string& name, mrb_value proc)
+{
+    mrb_value bh = async_bindings_hash(mrb);
+
+    /* Re-bind: swap the proc in place. */
+    if (!mrb_nil_p(mrb_hash_get(mrb, bh, mrb_symbol_value(name_sym)))) {
+        mrb_hash_set(mrb, bh, mrb_symbol_value(name_sym), proc);
+        return;
+    }
+
+    auto err = wv->bind(name,
+        [mrb, name_sym, wv](std::string id, std::string req, void*) {
+            invoke_bound_proc_async(mrb, name_sym, wv, id, req);
+        },
+        nullptr);
+    hypha_check_result(mrb, err);
+
+    mrb_hash_set(mrb, bh, mrb_symbol_value(name_sym), proc);
+}
+
+void
 hypha_unbind_on_main(mrb_state* mrb, webview::webview* wv, mrb_sym name_sym,
     const std::string& name)
 {
+    mrb_value sym_v = mrb_symbol_value(name_sym);
+    mrb_value sync_h = bindings_hash(mrb);
+    mrb_value async_h = async_bindings_hash(mrb);
+    bool in_sync = !mrb_nil_p(mrb_hash_get(mrb, sync_h, sym_v));
+    bool in_async = !mrb_nil_p(mrb_hash_get(mrb, async_h, sym_v));
 
     auto err = wv->unbind(name);
     hypha_check_result(mrb, err);
 
-    mrb_hash_delete_key(mrb, bindings_hash(mrb), mrb_symbol_value(name_sym));
+    if (in_sync)  mrb_hash_delete_key(mrb, sync_h, sym_v);
+    if (in_async) mrb_hash_delete_key(mrb, async_h, sym_v);
 }
 
 mrb_value
 hypha_bindings_on_main(mrb_state* mrb)
 {
-    mrb_value bh = mrb_iv_get(mrb,
-        mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(Hypha))),
-        MRB_SYM(bindings));
-    if (!mrb_hash_p(bh)) return mrb_ary_new(mrb);
+    mrb_value hypha = mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(Hypha)));
+    mrb_value sync_h = mrb_iv_get(mrb, hypha, MRB_SYM(bindings));
+    mrb_value async_h = mrb_iv_get(mrb, hypha, MRB_SYM(async_bindings));
 
-    return mrb_hash_keys(mrb, bh);;
+    mrb_value result = mrb_ary_new(mrb);
+    if (mrb_hash_p(sync_h)) {
+        mrb_value keys = mrb_hash_keys(mrb, sync_h);
+        for (mrb_int i = 0; i < RARRAY_LEN(keys); i++) {
+            mrb_ary_push(mrb, result, mrb_ary_ref(mrb, keys, i));
+        }
+    }
+    if (mrb_hash_p(async_h)) {
+        mrb_value keys = mrb_hash_keys(mrb, async_h);
+        for (mrb_int i = 0; i < RARRAY_LEN(keys); i++) {
+            mrb_ary_push(mrb, result, mrb_ary_ref(mrb, keys, i));
+        }
+    }
+    return result;
 }
 
 mrb_value
@@ -1127,6 +1252,30 @@ mrb_hypha_bind(mrb_state* mrb, mrb_value /*self*/)
     return mrb_nil_value();
 }
 
+/* Hypha.bind_async(name, &blk) -- main only. Block signature is        */
+/* (id, *args). The block is responsible for calling Hypha.resolve(id)  */
+/* { ... } at some point. */
+static mrb_value
+mrb_hypha_bind_async(mrb_state* mrb, mrb_value /*self*/)
+{
+    hypha_require_main_state(mrb, "Hypha.bind_async");
+
+    mrb_sym name_sym;
+    mrb_value blk = mrb_nil_value();
+    mrb_get_args(mrb, "n&", &name_sym, &blk);
+    if (mrb_nil_p(blk)) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "Hypha.bind_async requires a block");
+    }
+
+    mrb_int name_len;
+    const char* name_s = mrb_sym_name_len(mrb, name_sym, &name_len);
+    std::string name(name_s, static_cast<size_t>(name_len));
+
+    webview::webview* wv = hypha_require_running_local(mrb);
+    hypha_bind_async_on_main(mrb, wv, name_sym, name, blk);
+    return mrb_nil_value();
+}
+
 /* Hypha.unbind(name) -- main only. */
 static mrb_value
 mrb_hypha_unbind(mrb_state* mrb, mrb_value /*self*/)
@@ -1259,6 +1408,9 @@ hypha_install_runtime(mrb_state* mrb)
     /* Main-only methods that touch mrb_state-resident state. */
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(bind),
         mrb_hypha_bind,
+        MRB_ARGS_REQ(1) | MRB_ARGS_BLOCK());
+    mrb_define_class_method_id(mrb, hypha, MRB_SYM(bind_async),
+        mrb_hypha_bind_async,
         MRB_ARGS_REQ(1) | MRB_ARGS_BLOCK());
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(unbind),
         mrb_hypha_unbind, MRB_ARGS_REQ(1));

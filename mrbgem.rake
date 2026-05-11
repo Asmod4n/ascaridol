@@ -1,8 +1,8 @@
 MRuby::Gem::Specification.new('hypha-mrb') do |spec|
   spec.license = 'MIT'
   spec.author  = 'Hendrik Beskow'
-  spec.summary = 'Idiomatic Ruby bindings for the webview/webview library'
-  spec.version = '0.1.0'
+  spec.summary = 'A small Framework to build native desktop apps in mruby'
+  spec.version = '0.2.0'
 
   spec.add_dependency 'mruby-fast-json'
   spec.add_dependency 'mruby-c-ext-helpers'
