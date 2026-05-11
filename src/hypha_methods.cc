@@ -549,6 +549,21 @@ mrb_hypha_running_p(mrb_state* /*mrb*/, mrb_value /*self*/)
     return mrb_bool_value(g_wv.load(std::memory_order_acquire) != nullptr);
 }
 
+static mrb_value
+mrb_hypha_test_dispatch_raise(mrb_state* mrb, mrb_value /*self*/)
+{
+    webview::webview* wv = hypha_require_running(mrb);
+    wv->dispatch([]() {
+        fprintf(stderr, "[test] entered dispatch lambda\n");
+        hypha_protect_on_main([](mrb_state* mrb) {
+            mrb_raise(mrb, E_RUNTIME_ERROR, "induced from dispatch");
+            fprintf(stderr, "[test] AFTER raise (should not print)\n");
+        });
+        fprintf(stderr, "[test] after protect_on_main returned\n");
+    });
+    return mrb_nil_value();
+}
+
 /* ========================================================================= */
 /* gem_init                                                                  */
 /*                                                                           */
@@ -609,6 +624,9 @@ mrb_hypha_mrb_gem_init(mrb_state* mrb)
 
     mrb_define_class_method_id(mrb, hypha, MRB_SYM_Q(running),
         mrb_hypha_running_p, MRB_ARGS_NONE());
+
+    mrb_define_class_method_id(mrb, hypha, MRB_SYM(_test_dispatch_raise),
+        mrb_hypha_test_dispatch_raise, MRB_ARGS_NONE());
 }
 
 void

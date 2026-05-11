@@ -83,13 +83,16 @@ hypha_protect_on_main(F fn)
     if (!m) return;
 
     mrb_bool err = FALSE;
-    mrb_protect_error(m,
+    mrb_value exc = mrb_protect_error(m,
         [](mrb_state* mm, void* p) -> mrb_value {
             (*static_cast<F*>(p))(mm);
             return mrb_nil_value();
         },
         &fn, &err);
     if (err) {
+        /* mrb_protect_error clears mrb->exc and hands the exception back
+         * via the return value; restore it so mrb_print_error can print. */
+        m->exc = mrb_obj_ptr(exc);
         mrb_print_error(m);
         m->exc = nullptr;
     }
