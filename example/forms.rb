@@ -129,7 +129,7 @@ end
 def render_page
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>forms</title>
-    #{Webview.html_router(:route)}<style>#{CSS}</style></head>
+    #{Hypha.html_router(:route)}<style>#{CSS}</style></head>
     <body><h1>FORMS x VALIDATION</h1>
     #{render_card(render_form)}
     </body></html>

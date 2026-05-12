@@ -195,9 +195,11 @@ module Hypha
           elt.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
 
           ROUTE(mp.method, mp.path, params).then(function (html) {
-            if (swap === 'outerHTML') target.outerHTML = html;
-            else target.innerHTML = html;
-          }).catch(function (err) {
+              if (swap === 'delete')          { target.remove(); }
+              else if (swap === 'outerHTML')  { target.outerHTML = html; }
+              else if (swap === 'innerHTML' || !swap) { target.innerHTML = html; }
+              else                            { target.insertAdjacentHTML(swap, html); }
+            }).catch(function (err) {
             target.innerHTML = "<div class='error'>" +
               (err && err.message ? err.message : String(err)) + "</div>";
           }).finally(function () {

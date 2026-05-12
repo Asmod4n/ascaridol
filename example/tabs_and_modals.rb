@@ -126,7 +126,7 @@ def render_projects
       #{rows}
     </table>
     <p style="color:#555; font-size: .75rem; margin-top: 1.2rem; letter-spacing: .1em;">
-      CLICK A ROW TO TOGGLE DETAILS · ESC TO DISMISS MODALS
+      CLICK A ROW TO TOGGLE DETAILS
     </p>
   HTML
 end
