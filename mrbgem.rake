@@ -12,6 +12,7 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
   spec.add_dependency 'mruby-mustache', github: 'Asmod4n/mruby-mustache', branch: 'main'
   spec.add_dependency 'typedargs'
   spec.add_dependency 'mruby-proc-irep-ext'
+  spec.add_dependency 'mruby-class-ext', core: 'mruby-class-ext'
   spec.add_dependency 'mruby-string-ext', core: 'mruby-string-ext'
   spec.add_dependency 'mruby-hash-ext',   core: 'mruby-hash-ext'
   spec.add_dependency 'mruby-symbol-ext', core: 'mruby-symbol-ext'
