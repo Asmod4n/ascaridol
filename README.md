@@ -149,17 +149,85 @@ Ruby become rejected promises with a real `Error` object on the JS side
 block. Workers should send work to existing bindings via `Hypha.dispatch`,
 not register new ones.
 
-### `Hypha.resolve(id, &blk)`
+  ### `Hypha.bind_async(name, &blk)`
 
-Resolve a pending `bind_async` call. The block's return value is JSON-encoded and shipped to JS; if it raises, the promise rejects with `{name, message, backtrace}`. Safe from any thread — dispatches onto main automatically.
+  Like `Hypha.bind`, but the answer is deferred. The block receives an `id`
+  plus any JS-side args and is expected to call `Hypha.resolve(id) { ... }`
+  at some later point — possibly much later, possibly from another thread.
+  Use this whenever the answer isn't sitting in memory at the moment of the
+  call: waiting on I/O, on a timer, on user interaction, on a worker.
 
 ```ruby
-Hypha.bind_async(:later) { |id| @pending = id }
-# ...later, from anywhere:
-Hypha.resolve(@pending) { "done" }
+  Hypha.bind_async(:wait_for_ping) do |id, *args|
+    @pending = id    # stash the id, resolve later
+  end
 ```
 
-See [`example/bind_async.rb`](example/bind_async.rb) for a full stdin-as-a-promise example, including EOF handling and a queue that pairs JS-side waiters with buffered lines.
+```javascript
+  wait_for_ping().then(v => console.log(v));
+```
+
+  The block's return value is ignored — resolution happens through
+  `Hypha.resolve`, not through returning. If the block raises before
+  stashing the id, the promise auto-rejects with `{name, message, backtrace}`
+  so JS doesn't hang. Drop the id without resolving and the promise leaks
+  forever — that's on you.
+
+  `Hypha.bind_async` is main-thread-only. Re-binding the same name replaces
+  the previous block. Sync (`bind`) and async (`bind_async`) names share a
+  single namespace on the JS side but live in separate Ruby-side registries;
+  `Hypha.unbind(name)` clears whichever one is registered.
+
+  ### `Hypha.resolve(id, &blk)`
+
+  Settle a pending `bind_async` call. The block's return value is
+  JSON-encoded and shipped to JS; if it raises, the promise rejects with
+  `{name, message, backtrace}`. Thread-safe — hops onto the main run loop
+  internally, so you can call it from anywhere without `Hypha.dispatch`.
+
+  A minimal end-to-end example, no I/O, no threads:
+
+```ruby
+  Hypha.run(title: "resolve demo", size: [400, 200]) do |h|
+    pending = nil
+
+    # JS calls wait_for_ping() and gets a promise that hangs until
+    # someone calls ping_now().
+    h.bind_async(:wait_for_ping) do |id|
+      pending = id
+    end
+
+    h.bind(:ping_now) do
+      if pending
+        id, pending = pending, nil
+        h.resolve(id) { "pong at #{Time.now.to_i}" }
+        "delivered"
+      else
+        "no one waiting"
+      end
+    end
+
+    h.html = '<!doctype html>' \
+             '<button onclick="wait_for_ping().then(v => log.textContent = v)">wait</button>' \
+             '<button onclick="ping_now()">ping</button>' \
+             '<pre id="log"></pre>'
+  end
+```
+
+  Click **wait** first — the promise is pending, `id` is sitting in
+  `pending`. Click **ping** — `Hypha.resolve` fires the stashed id and the
+  `<pre>` updates.
+
+  The shape: `bind_async`'s job is to capture the id and return.
+  `Hypha.resolve(id) { ... }` is what actually settles the promise. Because
+  `resolve` is thread-safe, the resolver doesn't have to be another bind —
+  it can be `add_native_event`, an actor callback, a worker thread in a C
+  extension, whatever. The id is just a token; whoever holds it owns the
+  promise.
+
+  For a richer worked example (stdin lines delivered as JS promises, with
+  EOF handling and a buffer/waiter queue), see
+  [`example/bind_async.rb`](example/bind_async.rb).
 
 ### `Hypha.add_native_event(io, &blk)`
 

@@ -44,11 +44,13 @@ task :regen_stub => :mruby do
   sh %Q{"#{mrbc_path}" -Bhypha_main -o "#{EMBED_SOURCE}" "#{stub_rb}"}
 end
 
-desc "embed Ruby script into src/main.c (default: example/hello.rb)"
 task :embed, [:script] => :mruby do |_, args|
   script = resolve_script(args[:script])
+  mrbc   = mrbc_path
   puts "Embedding #{script} -> #{EMBED_SOURCE}"
-  sh %Q{"#{mrbc_path}" -Bhypha_main -o "#{EMBED_SOURCE}" "#{script}"}
+  Dir.chdir(File.dirname(script)) do
+    sh %Q{"#{mrbc}" -g -Bhypha_main -o "#{EMBED_SOURCE}" "#{File.basename(script)}"}
+  end
 end
 
 desc "compile binary (optional arg: path to .rb script)"
