@@ -71,6 +71,8 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
                (host_target.empty? && !is_windows && `uname -s 2>/dev/null`.strip == 'Darwin')
 
   if is_windows
+    spec.linker.flags << '/SUBSYSTEM:WINDOWS'
+    spec.linker.flags << '/ENTRY:mainCRTStartup'
     spec.linker.libraries.concat(%w[advapi32 ole32 shell32 shlwapi user32 version])
 
     pkg_dir = Dir.glob(File.join(spec.dir, 'packages', 'Microsoft.Web.WebView2.*')).max

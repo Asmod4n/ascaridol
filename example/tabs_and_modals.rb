@@ -1,31 +1,30 @@
-# Tabs + modal dialogs in mruby-webview, htmx-style.
+# Tabs + modal dialogs in mruby-webview, htmx-style, with mruby-mustache.
 #
 # Run with:  ./bin/mruby examples/tabs_and_modals/app.rb
 #
-# Demonstrates:
-#   - Tab strip where each tab swaps a content panel
-#   - "Active" tab tracked entirely on the server
-#   - Modal dialog opened by appending fragments to <body>
-#   - Modal dismissal via rb-swap="delete" (custom router op)
-#   - Inline detail rows that expand/collapse with afterend / delete
-#
-# All UI is a pure HTML fragment returned from Ruby. The router only
-# needs the standard verb attributes plus a couple of extra swap modes.
+# Same behavior as the string-concat version. Presentation lives in
+# pre-compiled Mustache templates; Ruby only prepares view data.
 
 PROJECTS = [
-  { id: 1, name: "atlas",   status: "shipping",   owner: "alice", desc: "Cross-platform GUI runtime built on system webviews. Now in beta." },
-  { id: 2, name: "beacon",  status: "in-review",  owner: "bob",   desc: "Distributed log aggregation for embedded fleets." },
-  { id: 3, name: "cipher",  status: "drafting",   owner: "carol", desc: "Lightweight key rotation service with per-tenant scopes." },
-  { id: 4, name: "dynamo",  status: "shipping",   owner: "dan",   desc: "Background job queue with priority lanes." },
-  { id: 5, name: "ember",   status: "blocked",    owner: "eve",   desc: "Hot-reloading config service. Awaiting security review." },
+  { id: 1, name: 'atlas',  status: 'shipping',  owner: 'alice', desc: 'Cross-platform GUI runtime built on system webviews. Now in beta.' },
+  { id: 2, name: 'beacon', status: 'in-review', owner: 'bob',   desc: 'Distributed log aggregation for embedded fleets.' },
+  { id: 3, name: 'cipher', status: 'drafting',  owner: 'carol', desc: 'Lightweight key rotation service with per-tenant scopes.' },
+  { id: 4, name: 'dynamo', status: 'shipping',  owner: 'dan',   desc: 'Background job queue with priority lanes.' },
+  { id: 5, name: 'ember',  status: 'blocked',   owner: 'eve',   desc: 'Hot-reloading config service. Awaiting security review.' },
 ]
 
 PEOPLE = [
-  { name: "alice",  role: "lead",      tz: "UTC+1" },
-  { name: "bob",    role: "engineer",  tz: "UTC-5" },
-  { name: "carol",  role: "engineer",  tz: "UTC+9" },
-  { name: "dan",    role: "designer",  tz: "UTC+0" },
-  { name: "eve",    role: "engineer",  tz: "UTC-3" },
+  { name: 'alice', role: 'lead',     tz: 'UTC+1' },
+  { name: 'bob',   role: 'engineer', tz: 'UTC-5' },
+  { name: 'carol', role: 'engineer', tz: 'UTC+9' },
+  { name: 'dan',   role: 'designer', tz: 'UTC+0' },
+  { name: 'eve',   role: 'engineer', tz: 'UTC-3' },
+]
+
+TABS = [
+  { id: 'projects', label: 'PROJECTS' },
+  { id: 'people',   label: 'PEOPLE'   },
+  { id: 'about',    label: 'ABOUT'    },
 ]
 
 CSS = <<~'CSS'
@@ -71,7 +70,6 @@ CSS = <<~'CSS'
   }
   .actions button:hover { color: #c8f542; border-color: #c8f542; }
 
-  /* modal */
   .scrim {
     position: fixed; inset: 0; background: #000a; backdrop-filter: blur(2px);
     display: flex; align-items: center; justify-content: center; padding: 2rem;
@@ -98,176 +96,185 @@ CSS = <<~'CSS'
   .modal button.danger { color: crimson; border-color: crimson; }
   .modal button.danger:hover { background: #dc143c20; }
   .modal button:hover { background: #232323; }
+
+  .accent     { color: #c8f542; }
+  .muted      { color: #666; }
+  .hint       { color: #555; font-size: .75rem; margin-top: 1.2rem; letter-spacing: .1em; }
+  .hint-small { color: #444; font-size: .7rem; margin-top: .6rem; letter-spacing: .15em; }
+  .about      { max-width: 480px; line-height: 1.6; color: #aaa; font-size: .9rem; }
+  .about p + p { margin-top: .8rem; }
+  .err        { color: crimson; }
 CSS
 
-def render_tab_strip(active)
-  tabs = [[:projects, "PROJECTS"], [:people, "PEOPLE"], [:about, "ABOUT"]]
-  inner = tabs.map do |id, label|
-    cls = active == id ? "tab active" : "tab"
-    "<button class='#{cls}' rb-get='/tab/#{id}' rb-target='#main' rb-swap='outerHTML'>#{label}</button>"
-  end.join
-  "<nav class='tabs'>#{inner}</nav>"
-end
+# ---------------------------------------------------------------------------
+# Templates — compiled once, reused forever. TPL doubles as the partials hash.
+# ---------------------------------------------------------------------------
 
-def render_main(active)
-  body = case active
-         when :projects then render_projects
-         when :people   then render_people
-         else                render_about
-         end
-  "<main id='main'>#{render_tab_strip(active)}<div class='panel'>#{body}</div></main>"
-end
+SOURCES = {
+  'page' => <<~MUSTACHE,
+    <!doctype html><html><head><meta charset="utf-8"><title>tabs + modals</title>
+    {{{router_script}}}<style>{{{css}}}</style></head>
+    <body><h1>TABS + MODALS x MRUBY</h1>
+    {{{main}}}
+    </body></html>
+  MUSTACHE
 
-def render_projects
-  rows = PROJECTS.map { |p| render_row(p) }.join
-  <<~HTML
+  'main' => <<~MUSTACHE,
+    <main id="main">
+      <nav class="tabs">
+        {{#tabs}}
+        <button class="tab{{#active}} active{{/active}}" rb-get="/tab/{{id}}" rb-target="#main" rb-swap="outerHTML">{{label}}</button>
+        {{/tabs}}
+      </nav>
+      <div class="panel">{{{body}}}</div>
+    </main>
+  MUSTACHE
+
+  'projects' => <<~MUSTACHE,
     <table>
       <thead><tr><th>Name</th><th>Status</th><th>Owner</th><th></th></tr></thead>
-      #{rows}
+      {{#projects}}{{>project_row}}{{/projects}}
     </table>
-    <p style="color:#555; font-size: .75rem; margin-top: 1.2rem; letter-spacing: .1em;">
-      CLICK A ROW TO TOGGLE DETAILS
-    </p>
-  HTML
-end
+    <p class="hint">CLICK A ROW TO TOGGLE DETAILS</p>
+  MUSTACHE
 
-def render_row(p)
-  "<tbody class='proj' id='row-#{p[:id]}'>" \
-    "<tr class='row' rb-get='/project/#{p[:id]}/toggle' " \
-        "rb-target='#row-#{p[:id]}' rb-swap='outerHTML'>" \
-      "<td>#{p[:name]}</td>" \
-      "<td><span class='pill #{p[:status]}'>#{p[:status]}</span></td>" \
-      "<td>#{p[:owner]}</td>" \
-      "<td class='actions'>" \
-        "<button rb-get='/project/#{p[:id]}/delete-confirm' " \
-                "rb-target='body' rb-swap='beforeend' " \
-                "onclick='event.stopPropagation()'>DELETE</button>" \
-      "</td>" \
-    "</tr>" \
-  "</tbody>"
-end
+  'project_row' => <<~MUSTACHE,
+    <tbody class="proj" id="row-{{id}}">
+      <tr class="row{{#expanded}} expanded{{/expanded}}" rb-get="{{toggle_url}}" rb-target="#row-{{id}}" rb-swap="outerHTML">
+        <td>{{name}}</td>
+        <td><span class="pill {{status}}">{{status}}</span></td>
+        <td>{{owner}}</td>
+        <td class="actions">
+          <button rb-get="/project/{{id}}/delete-confirm" rb-target="body" rb-swap="beforeend" onclick="event.stopPropagation()">DELETE</button>
+        </td>
+      </tr>
+      {{#expanded}}
+      <tr class="detail" rb-get="/project/{{id}}/collapse" rb-target="#row-{{id}}" rb-swap="outerHTML">
+        <td colspan="4">
+          <strong class="accent">{{name}}</strong> &mdash; owned by {{owner}} · status {{status}}<br>
+          <span class="muted">{{desc}}</span>
+          <div class="hint-small">CLICK TO COLLAPSE</div>
+        </td>
+      </tr>
+      {{/expanded}}
+    </tbody>
+  MUSTACHE
 
-def render_row_expanded(p)
-  "<tbody class='proj' id='row-#{p[:id]}'>" \
-    "<tr class='row expanded' rb-get='/project/#{p[:id]}/collapse' " \
-        "rb-target='#row-#{p[:id]}' rb-swap='outerHTML'>" \
-      "<td>#{p[:name]}</td>" \
-      "<td><span class='pill #{p[:status]}'>#{p[:status]}</span></td>" \
-      "<td>#{p[:owner]}</td>" \
-      "<td class='actions'>" \
-        "<button rb-get='/project/#{p[:id]}/delete-confirm' " \
-                "rb-target='body' rb-swap='beforeend' " \
-                "onclick='event.stopPropagation()'>DELETE</button>" \
-      "</td>" \
-    "</tr>" \
-    "<tr class='detail' rb-get='/project/#{p[:id]}/collapse' " \
-        "rb-target='#row-#{p[:id]}' rb-swap='outerHTML'>" \
-      "<td colspan='4'>" \
-        "<strong style='color:#c8f542'>#{p[:name]}</strong> &mdash; " \
-        "owned by #{p[:owner]} · status #{p[:status]}<br>" \
-        "<span style='color:#666'>#{p[:desc]}</span>" \
-        "<div style='color:#444; font-size:.7rem; margin-top:.6rem; letter-spacing:.15em'>CLICK TO COLLAPSE</div>" \
-      "</td>" \
-    "</tr>" \
-  "</tbody>"
-end
+  'people' => <<~MUSTACHE,
+    <table>
+      <thead><tr><th>Name</th><th>Role</th><th>TZ</th></tr></thead>
+      <tbody>
+        {{#people}}
+        <tr><td>{{name}}</td><td>{{role}}</td><td>{{tz}}</td></tr>
+        {{/people}}
+      </tbody>
+    </table>
+  MUSTACHE
 
-def render_people
-  rows = PEOPLE.map do |p|
-    "<tr><td>#{p[:name]}</td><td>#{p[:role]}</td><td>#{p[:tz]}</td></tr>"
-  end.join
-  "<table><thead><tr><th>Name</th><th>Role</th><th>TZ</th></tr></thead><tbody>#{rows}</tbody></table>"
-end
-
-def render_about
-  <<~HTML
-    <div style="max-width: 480px; line-height: 1.6; color: #aaa; font-size: .9rem;">
+  'about' => <<~MUSTACHE,
+    <div class="about">
       <p>Tabs and modals composed entirely from server-rendered HTML fragments.</p>
-      <p style="margin-top: .8rem;">No client state, no JSON wire format &mdash; just
-      Ruby returning HTML for every interaction. The custom router supplies
-      <code>afterend</code>, <code>beforeend</code>, and a synthetic
-      <code>delete</code> swap.</p>
+      <p>No client state, no JSON wire format &mdash; just Ruby returning HTML for every interaction. Templates are compiled <code>Mustache::Template</code> objects; the custom router supplies <code>afterend</code>, <code>beforeend</code>, and a synthetic <code>delete</code> swap.</p>
     </div>
-  HTML
-end
+  MUSTACHE
 
-def render_delete_modal(p)
-  <<~HTML
-    <div id="modal" class="scrim"
-         rb-get="" rb-trigger="click" rb-target="#modal" rb-swap="delete">
+  'delete_modal' => <<~MUSTACHE,
+    <div id="modal" class="scrim" rb-get="" rb-trigger="click" rb-target="#modal" rb-swap="delete">
       <div class="modal" onclick="event.stopPropagation()">
         <h3>DELETE PROJECT</h3>
-        <p>Permanently delete <strong style="color:#c8f542">#{p[:name]}</strong>?
-        This cannot be undone.</p>
+        <p>Permanently delete <strong class="accent">{{name}}</strong>? This cannot be undone.</p>
         <div class="row-buttons">
           <button onclick="document.getElementById('modal').remove()">CANCEL</button>
-          <button class="danger"
-                  rb-delete="/project/#{p[:id]}"
-                  rb-target="#main"
-                  rb-swap="outerHTML"
+          <button class="danger" rb-delete="/project/{{id}}" rb-target="#main" rb-swap="outerHTML"
                   onclick="setTimeout(function(){var m=document.getElementById('modal');if(m)m.remove();},0)">DELETE</button>
         </div>
       </div>
     </div>
-  HTML
+  MUSTACHE
+
+  'not_found' => %(<p class="err">404 {{method}} {{path}}</p>),
+}
+
+TPL = SOURCES.transform_values { |src| Mustache::Template.compile(src) }
+
+def render(name, data = nil) = TPL.fetch(name).render(data, TPL)
+
+# ---------------------------------------------------------------------------
+# View-data prep
+# ---------------------------------------------------------------------------
+
+def tabs_for(active)
+  TABS.map { |t| { id: t[:id], label: t[:label], active: t[:id] == active.to_s } }
 end
 
-def render_page
-  <<~HTML
-    <!doctype html><html><head><meta charset="utf-8"><title>tabs + modals</title>
-    #{Hypha.html_router(:route)}<style>#{CSS}</style></head>
-    <body><h1>TABS + MODALS x MRUBY</h1>
-    #{render_main(:projects)}
-    </body></html>
-  HTML
+def project_view(p, expanded: false)
+  return nil unless p
+  p.merge(
+    expanded:   expanded,
+    toggle_url: expanded ? "/project/#{p[:id]}/collapse" : "/project/#{p[:id]}/toggle",
+  )
 end
 
-def find_project(id) = PROJECTS.find { |p| p[:id] == id.to_i }
+def panel_html(active)
+  case active
+  when 'projects' then render('projects', projects: PROJECTS.map { |p| project_view(p) })
+  when 'people'   then render('people',   people: PEOPLE)
+  else                 render('about')
+  end
+end
+
+def main_html(active)
+  render('main', tabs: tabs_for(active), body: panel_html(active))
+end
+
+def page_html
+  render('page',
+         router_script: Hypha.html_router(:route),
+         css:           CSS,
+         main:          main_html('projects'))
+end
+
+# ---------------------------------------------------------------------------
+# Routing (unchanged shape — mruby has no Regexp, so leading_id stays)
+# ---------------------------------------------------------------------------
+
+def find_project(id)    = PROJECTS.find { |p| p[:id] == id.to_i }
 def delete_project(id)  = PROJECTS.reject! { |p| p[:id] == id.to_i }
 
-# Tiny path matcher — avoids mruby's missing Regexp. Returns the captured
-# trailing segment if `path` starts with `prefix` and has more after it,
-# otherwise nil.
 def path_after(path, prefix)
   return nil unless path.start_with?(prefix)
   rest = path[prefix.length..]
   rest.empty? ? nil : rest
 end
 
-# Extract the leading numeric segment from a string like "1/toggle" -> "1".
 def leading_id(s)
   i = 0
-  i += 1 while i < s.length && s[i] >= "0" && s[i] <= "9"
+  i += 1 while i < s.length && s[i] >= '0' && s[i] <= '9'
   s[0, i]
 end
 
 def route(method, path, _params)
   case method
-  when "GET"
-    if (rest = path_after(path, "/tab/"))
-      render_main(rest.to_sym)
-    elsif (rest = path_after(path, "/project/"))
+  when 'GET'
+    if (rest = path_after(path, '/tab/'))
+      main_html(rest)
+    elsif (rest = path_after(path, '/project/'))
       id = leading_id(rest)
-      if rest.end_with?("/delete-confirm")
-        render_delete_modal(find_project(id))
-      elsif rest.end_with?("/toggle")
-        render_row_expanded(find_project(id))
-      elsif rest.end_with?("/collapse")
-        render_row(find_project(id))
+      p  = find_project(id)
+      if    rest.end_with?('/delete-confirm') then p && render('delete_modal', p)
+      elsif rest.end_with?('/toggle')         then render('project_row', project_view(p, expanded: true))
+      elsif rest.end_with?('/collapse')       then render('project_row', project_view(p))
       end
     end
-  when "DELETE"
-    if (rest = path_after(path, "/project/"))
+  when 'DELETE'
+    if (rest = path_after(path, '/project/'))
       delete_project(rest)
-      # Replace the whole main view so list, modal, and any open detail rows
-      # all reset cleanly. The router target for the DELETE button is #modal,
-      # so we need to dismiss it client-side too.
-      render_main(:projects)
+      main_html('projects')
     end
-  end || "<p style='color:crimson'>404 #{method} #{path}</p>"
+  end || render('not_found', method: method, path: path)
 end
 
-Hypha.run(title: "tabs + modals x mruby", size: [820, 620], debug: true) do |w|
+Hypha.run(title: 'tabs + modals x mruby', size: [820, 620], debug: true) do |w|
   w.bind(:route) { |m, p, params| route(m, p, params) }
-  w.html = render_page
+  w.html = page_html
 end

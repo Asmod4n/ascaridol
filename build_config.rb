@@ -1,7 +1,6 @@
 MRuby::Build.new do |conf|
   toolchain :visualcpp
 
-
   conf.cc.defines  << 'MRB_UTF8_STRING' << 'MRB_HIGH_PROFILE'
   conf.cxx.defines << 'MRB_UTF8_STRING' << 'MRB_HIGH_PROFILE'
   conf.enable_test
