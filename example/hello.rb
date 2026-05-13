@@ -30,7 +30,7 @@ html = <<~HTML
   </html>
 HTML
 
-Hypha.run(title: 'mruby-webview demo', size: [640, 480], debug: true) do |w|
+Hypha.run(title: 'mruby-webview demo', size: [640, 480]) do |w|
 
   w.bind(:greet) do |name|
     "Hello, #{name}! (replied at #{Time.now rescue 'now'})"

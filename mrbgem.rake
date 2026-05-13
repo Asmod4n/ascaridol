@@ -58,6 +58,7 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
   # ------------------------------------------------------------------------
   # Detect the *target* platform we're building mruby for.
   # ------------------------------------------------------------------------
+  debug = spec.build.cc.defines.include?('MRB_DEBUG')
   build       = spec.build
   toolchains  = Array(build.respond_to?(:toolchains) ? build.toolchains : [])
   cc_command  = build.cc.command.to_s
@@ -71,8 +72,10 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
                (host_target.empty? && !is_windows && `uname -s 2>/dev/null`.strip == 'Darwin')
 
   if is_windows
-    spec.linker.flags << '/SUBSYSTEM:WINDOWS'
-    spec.linker.flags << '/ENTRY:mainCRTStartup'
+    unless debug
+        spec.linker.flags << '/SUBSYSTEM:WINDOWS'
+        spec.linker.flags << '/ENTRY:mainCRTStartup'
+    end
     spec.linker.libraries.concat(%w[advapi32 ole32 shell32 shlwapi user32 version])
 
     pkg_dir = Dir.glob(File.join(spec.dir, 'packages', 'Microsoft.Web.WebView2.*')).max

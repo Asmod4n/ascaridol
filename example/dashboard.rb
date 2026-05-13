@@ -262,7 +262,7 @@ def route(method, path, params)
 end
 
 
-    Hypha.run(title: "dashboard x mruby", size: [900, 720], debug: true) do |w|
+    Hypha.run(title: "dashboard x mruby", size: [900, 720]) do |w|
       w.bind(:route) { |m, p, params| route(m, p, params) }
       w.html = render_page(w.bindings.map(&:to_s))
     end

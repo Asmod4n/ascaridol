@@ -160,7 +160,7 @@ def route(method, path, params)
   end
 end
 
-Hypha.run(title: "forms x mruby", size: [600, 600], debug: true) do |w|
+Hypha.run(title: "forms x mruby", size: [600, 600]) do |w|
   w.bind(:route) { |m, p, params| route(m, p, params) }
   w.html = render_page
 end

@@ -271,7 +271,7 @@ def route(method, path, params)
   end || "<p style='color:crimson'>404 #{method} #{path}</p>"
 end
 
-Hypha.run(title: "notes x mruby", size: [900, 620], debug: true) do |w|
+Hypha.run(title: "notes x mruby", size: [900, 620]) do |w|
 w.bind(:route) do |m, p, params|
     route(m, p, params || {})
 end

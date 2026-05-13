@@ -1032,28 +1032,26 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
     /* Parse kwargs. We accept all of these as optional keyword arguments. */
     mrb_value kw_title = mrb_nil_value();
     mrb_value kw_size = mrb_nil_value();
-    mrb_bool  kw_debug = FALSE;
     mrb_value kw_html = mrb_nil_value();
     mrb_value kw_url = mrb_nil_value();
     mrb_value kw_init = mrb_nil_value();
 
     const mrb_sym kw_names[] = {
-        MRB_SYM(title), MRB_SYM(size), MRB_SYM(debug),
+        MRB_SYM(title), MRB_SYM(size),
         MRB_SYM(html),  MRB_SYM(url),  MRB_SYM(init)
     };
-    mrb_value kw_values[6];
+    mrb_value kw_values[5];
     mrb_kwargs kwargs = {
-        6, 0, kw_names, kw_values, nullptr
+        5, 0, kw_names, kw_values, nullptr
     };
     mrb_value blk = mrb_nil_value();
     mrb_get_args(mrb, ":&", &kwargs, &blk);
 
     if (!mrb_undef_p(kw_values[0])) kw_title = kw_values[0];
     if (!mrb_undef_p(kw_values[1])) kw_size = kw_values[1];
-    if (!mrb_undef_p(kw_values[2])) kw_debug = mrb_test(kw_values[2]);
-    if (!mrb_undef_p(kw_values[3])) kw_html = kw_values[3];
-    if (!mrb_undef_p(kw_values[4])) kw_url = kw_values[4];
-    if (!mrb_undef_p(kw_values[5])) kw_init = kw_values[5];
+    if (!mrb_undef_p(kw_values[2])) kw_html = kw_values[2];
+    if (!mrb_undef_p(kw_values[3])) kw_url = kw_values[3];
+    if (!mrb_undef_p(kw_values[4])) kw_init = kw_values[4];
 
     if (!mrb_nil_p(kw_html) && !mrb_nil_p(kw_url)) {
         mrb_raise(mrb, E_ARGUMENT_ERROR,
@@ -1064,7 +1062,12 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
      * are baked in here; we don't expose a window: kwarg for now. */
     webview::webview* wv;
     try {
-        wv = new webview::webview(static_cast<bool>(kw_debug), nullptr);
+#ifdef MRB_DEBUG
+        wv = new webview::webview(true, nullptr);
+#else
+        wv = new webview::webview(false, nullptr);
+#endif
+        
     }
     catch (const webview::exception& e) {
         hypha_check(mrb, e.error().code(), e.error().message());
@@ -1447,8 +1450,12 @@ hypha_install_runtime(mrb_state* mrb)
 /* ========================================================================= */
 
 int
-main(int argc, const char* argv[])
+main(int argc, const char* const argv[])
 {
+    if (argc > 1 && std::string_view(argv[1]) == "--prewarm") {
+        webview::webview w(false, nullptr);
+        return 0;
+    }
     mrb_state* mrb = mrb_open();
     if (!mrb) return 1;
     g_main_mrb.store(mrb, std::memory_order_release);

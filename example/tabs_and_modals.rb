@@ -274,7 +274,7 @@ def route(method, path, _params)
   end || render('not_found', method: method, path: path)
 end
 
-Hypha.run(title: 'tabs + modals x mruby', size: [820, 620], debug: true) do |w|
+Hypha.run(title: 'tabs + modals x mruby', size: [820, 620]) do |w|
   w.bind(:route) { |m, p, params| route(m, p, params) }
   w.html = page_html
 end
