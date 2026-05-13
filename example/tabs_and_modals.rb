@@ -1,6 +1,4 @@
-# Tabs + modal dialogs in mruby-webview, htmx-style, with mruby-mustache.
-#
-# Run with:  ./bin/mruby examples/tabs_and_modals/app.rb
+# Tabs + modal dialogs in hypha-mrb, htmx-style, with mruby-mustache.
 #
 # Same behavior as the string-concat version. Presentation lives in
 # pre-compiled Mustache templates; Ruby only prepares view data.
