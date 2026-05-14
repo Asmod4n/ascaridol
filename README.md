@@ -233,22 +233,81 @@ not register new ones.
   EOF handling and a buffer/waiter queue), see
   [`example/bind_async.rb`](example/bind_async.rb).
 
-### `Hypha.add_native_event(io, &blk)`
+### `Hypha.add_native_event(io, readiness = :r, &blk)`
 
 Watch a file descriptor on the main run loop. The block fires when the fd
-becomes ready.
+becomes ready in the requested direction.
 
 ```ruby
-Hypha.add_native_event($stdin) do |io, events|
+Hypha.add_native_event($stdin) do |io, cond|
   line = io.gets
   Hypha.eval("console.log(#{JSON.dump(line)})")
   true   # return falsy to stop watching
 end
 ```
 
-Cross-platform: GTK uses `g_unix_fd_add`, macOS uses `CFFileDescriptor`,
-Windows uses `WSAAsyncSelect` (so on Windows, the fd must be a winsock
-socket, not a regular Win32 handle). Main-thread-only.
+**Readiness** — the optional second argument tells Hypha which direction(s)
+of readiness to watch for. Defaults to `:r`.
+
+| Argument | Watches               |
+|----------|-----------------------|
+| `:r`     | readable              |
+| `:w`     | writable              |
+| `:rw`    | readable and writable |
+
+`:rw` is the right choice when one callback needs to handle both directions
+— e.g. an echo server that reads inbound bytes and drains its send buffer
+in the same block. A simpler "read-only" or "write-only" watcher should use
+`:r` or `:w` and toggle by `remove_native_event` + re-add when its needs
+change.
+
+**Block arguments** — `(io, cond)` where `cond` is a Symbol describing what
+just happened on this wakeup:
+
+| `cond`  | Meaning                                                          |
+|---------|------------------------------------------------------------------|
+| `:r`    | readable (peer close surfaces here too — `recv` will return EOF) |
+| `:w`    | writable                                                         |
+| `:rw`   | both directions ready in the same wakeup                         |
+| `:err`  | underlying watcher reported an error; tear down                  |
+
+You only ever see `cond` values consistent with what you registered:
+
+| Registered | Possible `cond`             |
+|------------|-----------------------------|
+| `:r`       | `:r`, `:err`                |
+| `:w`       | `:w`, `:err`                |
+| `:rw`      | `:r`, `:w`, `:rw`, `:err`   |
+
+The block's return value controls watcher lifetime: truthy keeps watching,
+falsy unwatches and drops the fd.
+
+**Cross-platform** — GTK uses `g_unix_fd_add`, macOS uses
+`CFFileDescriptor` + `CFRunLoopSource`, Windows uses `WSAAsyncSelect` on a
+hidden message-only `HWND`. The block sees the same `cond` Symbol on every
+platform; you don't need to write per-OS branches.
+
+A few platform quirks worth knowing:
+
+- **Windows**: the fd must be a winsock `SOCKET`, not a regular Win32
+  `HANDLE`. `WSAAsyncSelect` also flips the socket to non-blocking as a
+  side effect, and locks out further `ioctlsocket(FIONBIO, ...)` changes —
+  so don't try to put it back into blocking mode while the watcher is
+  attached.
+- **Linux / macOS**: the fd's blocking flag is not touched. If you want
+  non-blocking I/O (you probably do — otherwise a `recv` after a spurious
+  wakeup will stall the run loop), call `io._setnonblock(true)` before
+  `add_native_event`. Accepted client sockets inherit the listener's
+  flag, so setting it once on the listener is enough.
+
+Main-thread-only — calling from a worker raises. Native event watchers
+need a closure over your application state (sockets, buffers, your own
+callbacks), and `Hypha.dispatch` serializes procs by value, which would
+strip that closure. Register watchers from main directly, typically in
+the `Hypha.run` block or a `Hypha.bind` callback.
+
+See [`example/echo_server.rb`](example/echo_server.rb) for a complete TCP
+echo server using `:rw` and an `:err` teardown branch.
 
 ### `Hypha.dispatch(*args, &blk)`
 

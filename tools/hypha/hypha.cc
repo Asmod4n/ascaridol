@@ -464,6 +464,43 @@ fds_hash(mrb_state* mrb)
     return h;
 }
 
+/* Portable readiness bits yielded to the user block. Mirror GIOCondition
+ * (G_IO_IN=1, G_IO_OUT=4) so the block sees identical integers on GTK,
+ * Cocoa, and Win32. */
+enum hypha_fd_cond {
+    HYPHA_FD_READ  = 1,
+    HYPHA_FD_WRITE = 4,
+    HYPHA_FD_ERROR = 8,
+};
+
+static unsigned int
+hypha_parse_readiness(mrb_state* mrb, mrb_value v)
+{
+    if (mrb_nil_p(v) || mrb_undef_p(v)) return HYPHA_FD_READ;
+    if (!mrb_symbol_p(v)) {
+        mrb_raise(mrb, E_TYPE_ERROR,
+            "readiness must be a Symbol (:r, :w, :rw)");
+    }
+    mrb_sym s = mrb_symbol(v);
+    if (s == MRB_SYM(r))  return HYPHA_FD_READ;
+    if (s == MRB_SYM(w))  return HYPHA_FD_WRITE;
+    if (s == MRB_SYM(rw)) return HYPHA_FD_READ | HYPHA_FD_WRITE;
+    mrb_raisef(mrb, E_ARGUMENT_ERROR,
+        "invalid readiness %n (want :r, :w, or :rw)", s);
+    return 0; /* unreachable */
+}
+
+static mrb_sym
+hypha_cond_to_sym(unsigned int conds)
+{
+    if (conds & HYPHA_FD_ERROR) return MRB_SYM(err);
+    bool r = (conds & HYPHA_FD_READ)  != 0;
+    bool w = (conds & HYPHA_FD_WRITE) != 0;
+    if (r && w) return MRB_SYM(rw);
+    if (w)      return MRB_SYM(w);
+    return MRB_SYM(r);  /* bare error-less wakeups default to :r */
+}
+
 #ifdef WEBVIEW_GTK
 #include <glib-unix.h>
 
@@ -487,8 +524,13 @@ on_fd_ready(gint /*fd*/, GIOCondition condition, gpointer user_data)
     mrb_state* mrb = ud->mrb;
     int ai = mrb_gc_arena_save(mrb);
 
+    unsigned int conds = 0;
+    if (condition & (G_IO_IN | G_IO_HUP))   conds |= HYPHA_FD_READ;
+    if (condition & G_IO_OUT)               conds |= HYPHA_FD_WRITE;
+    if (condition & (G_IO_ERR | G_IO_NVAL)) conds |= HYPHA_FD_ERROR;
+
     const mrb_value argv[] = {
-        ud->fd, mrb_int_value(mrb, condition)
+        ud->fd, mrb_symbol_value(hypha_cond_to_sym(conds))
     };
     mrb_bool cont = mrb_test(mrb_yield_argv(mrb, ud->blk, 2, argv));
     if (!cont) {
@@ -516,7 +558,7 @@ hypha_fdud_init(mrb_state* mrb, mrb_value self)
 
 void
 hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
-    mrb_value fd_obj, mrb_value blk)
+    mrb_value fd_obj, mrb_value blk, unsigned int mask)
 {
     int fd = (int)mrb_integer(mrb_type_convert(mrb, fd_obj,
         MRB_TT_INTEGER, MRB_SYM(fileno)));
@@ -529,7 +571,13 @@ hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
     mrb_hash_set(mrb, fds_hash(mrb), fd_obj, ud_obj);
 
     auto* ud = mrb_cpp_get<mrb_hypha_fd_ud>(mrb, ud_obj);
-    ud->id = g_unix_fd_add(fd, G_IO_IN, on_fd_ready, DATA_PTR(ud_obj));
+    GIOCondition cond = (GIOCondition)0;
+    if (mask & HYPHA_FD_READ)
+        cond = (GIOCondition)(cond | G_IO_IN  | G_IO_HUP | G_IO_ERR);
+    if (mask & HYPHA_FD_WRITE)
+        cond = (GIOCondition)(cond | G_IO_OUT | G_IO_ERR);
+
+    ud->id = g_unix_fd_add(fd, cond, on_fd_ready, DATA_PTR(ud_obj));
 }
 
 void
@@ -555,6 +603,7 @@ struct mrb_hypha_fd_ud {
     mrb_value blk;
     CFFileDescriptorRef cf_fd = nullptr;
     CFRunLoopSourceRef  src = nullptr;
+    CFOptionFlags       rearm_mask = 0;
 
     ~mrb_hypha_fd_ud() {
         if (src) {
@@ -573,17 +622,24 @@ struct mrb_hypha_fd_ud {
 MRB_CPP_DEFINE_TYPE(mrb_hypha_fd_ud, Hypha_FDUD);
 
 static void
-on_cf_fd_ready(CFFileDescriptorRef cf_fd, CFOptionFlags /*types*/, void* info)
+on_cf_fd_ready(CFFileDescriptorRef cf_fd, CFOptionFlags types, void* info)
 {
     auto* ud = static_cast<mrb_hypha_fd_ud*>(info);
     mrb_state* mrb = ud->mrb;
     int ai = mrb_gc_arena_save(mrb);
 
-    const mrb_value argv[] = { ud->fd, mrb_int_value(mrb, 1) /* G_IO_IN-equivalent */ };
+    unsigned int conds = 0;
+    if (types & kCFFileDescriptorReadCallBack)  conds |= HYPHA_FD_READ;
+    if (types & kCFFileDescriptorWriteCallBack) conds |= HYPHA_FD_WRITE;
+
+    const mrb_value argv[] = { ud->fd, mrb_symbol_value(hypha_cond_to_sym(conds)) };
     mrb_bool cont = mrb_test(mrb_yield_argv(mrb, ud->blk, 2, argv));
 
     if (cont) {
-        CFFileDescriptorEnableCallBacks(cf_fd, kCFFileDescriptorReadCallBack);
+        /* One-shot rearm with the FULL configured mask; rearming with
+         * `types` alone would silently drop one direction after the
+         * first wakeup. */
+        CFFileDescriptorEnableCallBacks(cf_fd, ud->rearm_mask);
     }
     else {
         mrb_hash_delete_key(mrb, fds_hash(mrb), ud->fd);
@@ -608,7 +664,7 @@ hypha_fdud_init(mrb_state* mrb, mrb_value self)
 
 void
 hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
-    mrb_value fd_obj, mrb_value blk)
+    mrb_value fd_obj, mrb_value blk, unsigned int mask)
 {
     int fd = (int)mrb_integer(mrb_type_convert(mrb, fd_obj,
         MRB_TT_INTEGER, MRB_SYM(fileno)));
@@ -622,6 +678,11 @@ hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
 
     auto* ud = mrb_cpp_get<mrb_hypha_fd_ud>(mrb, ud_obj);
 
+    CFOptionFlags cb = 0;
+    if (mask & HYPHA_FD_READ)  cb |= kCFFileDescriptorReadCallBack;
+    if (mask & HYPHA_FD_WRITE) cb |= kCFFileDescriptorWriteCallBack;
+    ud->rearm_mask = cb;
+
     CFFileDescriptorContext ctx = { 0, ud, nullptr, nullptr, nullptr };
     ud->cf_fd = CFFileDescriptorCreate(kCFAllocatorDefault, fd,
         /*closeOnInvalidate=*/false,
@@ -630,7 +691,7 @@ hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
         mrb_hash_delete_key(mrb, fds_hash(mrb), fd_obj);
         mrb_raise(mrb, E_RUNTIME_ERROR, "CFFileDescriptorCreate failed");
     }
-    CFFileDescriptorEnableCallBacks(ud->cf_fd, kCFFileDescriptorReadCallBack);
+    CFFileDescriptorEnableCallBacks(ud->cf_fd, cb);
 
     ud->src = CFFileDescriptorCreateRunLoopSource(kCFAllocatorDefault, ud->cf_fd, 0);
     if (!ud->src) {
@@ -729,7 +790,11 @@ hypha_fd_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     auto* ud = mrb_cpp_get<mrb_hypha_fd_ud>(mrb, ud_obj);
     if (!ud) { mrb_gc_arena_restore(mrb, ai); return 0; }
 
-    const mrb_value argv[] = { ud->fd, mrb_int_value(mrb, evt) };
+    unsigned int conds = 0;
+    if (evt & (FD_READ | FD_OOB | FD_ACCEPT | FD_CLOSE)) conds |= HYPHA_FD_READ;
+    if (evt & (FD_WRITE | FD_CONNECT))                   conds |= HYPHA_FD_WRITE;
+    if (err != 0)                                        conds |= HYPHA_FD_ERROR;
+    const mrb_value argv[] = { ud->fd, mrb_symbol_value(hypha_cond_to_sym(conds)) };
     mrb_bool cont = mrb_test(mrb_yield_argv(mrb, ud->blk, 2, argv));
 
     if (!cont || (evt & FD_CLOSE) || err != 0) {
@@ -815,7 +880,7 @@ hypha_fdud_init(mrb_state* mrb, mrb_value self)
 
 void
 hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
-    mrb_value fd_obj, mrb_value blk)
+    mrb_value fd_obj, mrb_value blk, unsigned int mask)
 {
     int fd = (int)mrb_integer(mrb_type_convert(mrb, fd_obj,
         MRB_TT_INTEGER, MRB_SYM(fileno)));
@@ -843,8 +908,12 @@ hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
 
     mrb_hash_set(mrb, sockmap_hash(mrb), mrb_int_value(mrb, fd), fd_obj);
 
-    long mask = FD_READ | FD_ACCEPT | FD_CLOSE | FD_OOB;
-    if (WSAAsyncSelect((SOCKET)fd, hwnd, MRB_HYPHA_WM_FD, mask) == SOCKET_ERROR) {
+    long lEvent = 0;
+    if (mask & HYPHA_FD_READ)  lEvent |= FD_READ | FD_OOB | FD_ACCEPT;
+    if (mask & HYPHA_FD_WRITE) lEvent |= FD_WRITE | FD_CONNECT;
+    lEvent |= FD_CLOSE;  /* always -- peer-close needs to surface for teardown */
+
+    if (WSAAsyncSelect((SOCKET)fd, hwnd, MRB_HYPHA_WM_FD, lEvent) == SOCKET_ERROR) {
         int err = WSAGetLastError();
         mrb_hash_delete_key(mrb, sockmap_hash(mrb), mrb_int_value(mrb, fd));
         mrb_hash_delete_key(mrb, fds_hash(mrb), fd_obj);
@@ -1318,15 +1387,17 @@ mrb_hypha_add_native_event(mrb_state* mrb, mrb_value /*self*/)
     hypha_require_main_state(mrb, "Hypha.add_native_event");
 
     mrb_value fd_obj;
+    mrb_value readiness = mrb_nil_value();
     mrb_value blk = mrb_nil_value();
-    mrb_get_args(mrb, "o&", &fd_obj, &blk);
+    mrb_get_args(mrb, "o|o&", &fd_obj, &readiness, &blk);
     if (mrb_nil_p(blk)) {
         mrb_raise(mrb, E_ARGUMENT_ERROR,
             "Hypha.add_native_event requires a block");
     }
+    unsigned int mask = hypha_parse_readiness(mrb, readiness);
 
     webview::webview* wv = hypha_require_running_local(mrb);
-    hypha_add_native_event_on_main(mrb, wv, fd_obj, blk);
+    hypha_add_native_event_on_main(mrb, wv, fd_obj, blk, mask);
     return mrb_nil_value();
 }
 
@@ -1433,7 +1504,7 @@ hypha_install_runtime(mrb_state* mrb)
         mrb_hypha_unbind, MRB_ARGS_REQ(1));
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(add_native_event),
         mrb_hypha_add_native_event,
-        MRB_ARGS_REQ(1) | MRB_ARGS_BLOCK());
+        MRB_ARGS_ARG(1, 1) | MRB_ARGS_BLOCK());
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(remove_native_event),
         mrb_hypha_remove_native_event,
         MRB_ARGS_REQ(1));
