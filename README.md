@@ -506,7 +506,7 @@ that all raise "Hypha is not running" until you start Hypha with Hypha.run); `to
 
 ## License
 
-Apache-2.0. See LICENSE.
+MIT. See LICENSE.
 
 ## Acknowledgments
 
