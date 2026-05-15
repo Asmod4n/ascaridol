@@ -18,6 +18,7 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
   spec.add_dependency 'mruby-symbol-ext', core: 'mruby-symbol-ext'
   spec.add_dependency 'mruby-error',      core: 'mruby-error'
   spec.add_dependency 'mruby-proc-ext',   core: 'mruby-proc-ext'
+  spec.add_dependency 'mruby-io',           core: 'mruby-io'
 
   # mruby-fast-json requires UTF-8 string support.
   spec.cc.defines  << 'MRB_UTF8_STRING'

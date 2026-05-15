@@ -101,7 +101,7 @@ Hypha.run(
 ) do |h|
   # do anything that requires the webview to be live:
   h.bind(:foo) { ... }
-  h.add_native_event($stdin) { |io, evt| ... }
+  h.poll_add($stdin, watch = :r) { |io, evt| ... }
   h.html = render_initial_page
 end
 ```
@@ -225,7 +225,7 @@ not register new ones.
   The shape: `bind_async`'s job is to capture the id and return.
   `Hypha.resolve(id) { ... }` is what actually settles the promise. Because
   `resolve` is thread-safe, the resolver doesn't have to be another bind —
-  it can be `add_native_event`, an actor callback, a worker thread in a C
+  it can be `poll_add`, an actor callback, a worker thread in a C
   extension, whatever. The id is just a token; whoever holds it owns the
   promise.
 
@@ -233,13 +233,14 @@ not register new ones.
   EOF handling and a buffer/waiter queue), see
   [`example/bind_async.rb`](example/bind_async.rb).
 
-### `Hypha.add_native_event(io, readiness = :r, &blk)`
+### `Hypha.poll_add(io, readiness = :r, &blk)`
 
-Watch a file descriptor on the main run loop. The block fires when the fd
-becomes ready in the requested direction.
+Watch a file descriptor on the main run
+loop. The block fires when the fd becomes ready in the requested
+direction. Returns a `Hypha::Watcher` (see below).
 
 ```ruby
-Hypha.add_native_event($stdin) do |io, cond|
+watcher = Hypha.poll_add($stdin) do |io, cond|
   line = io.gets
   Hypha.eval("console.log(#{JSON.dump(line)})")
   true   # return falsy to stop watching
@@ -255,11 +256,10 @@ of readiness to watch for. Defaults to `:r`.
 | `:w`     | writable              |
 | `:rw`    | readable and writable |
 
-`:rw` is the right choice when one callback needs to handle both directions
-— e.g. an echo server that reads inbound bytes and drains its send buffer
-in the same block. A simpler "read-only" or "write-only" watcher should use
-`:r` or `:w` and toggle by `remove_native_event` + re-add when its needs
-change.
+Use `:r` when you only consume from the fd, `:w` when you only produce,
+`:rw` when one callback handles both. To switch a live watcher between
+modes (e.g. only ask for `:w` wakeups when your outbox has bytes), use
+`Watcher#update` — see below.
 
 **Block arguments** — `(io, cond)` where `cond` is a Symbol describing what
 just happened on this wakeup:
@@ -297,8 +297,8 @@ A few platform quirks worth knowing:
 - **Linux / macOS**: the fd's blocking flag is not touched. If you want
   non-blocking I/O (you probably do — otherwise a `recv` after a spurious
   wakeup will stall the run loop), call `io._setnonblock(true)` before
-  `add_native_event`. Accepted client sockets inherit the listener's
-  flag, so setting it once on the listener is enough.
+  `poll_add`. Accepted client sockets inherit the listener's flag, so
+  setting it once on the listener is enough.
 
 Main-thread-only — calling from a worker raises. Native event watchers
 need a closure over your application state (sockets, buffers, your own
@@ -307,7 +307,42 @@ strip that closure. Register watchers from main directly, typically in
 the `Hypha.run` block or a `Hypha.bind` callback.
 
 See [`example/echo_server.rb`](example/echo_server.rb) for a complete TCP
-echo server using `:rw` and an `:err` teardown branch.
+echo server that uses `Watcher#update` to toggle `:r` ↔ `:rw` as its
+outbox fills and drains.
+
+### `Hypha::Watcher`
+
+`Hypha.poll_add` returns a handle representing the live subscription.
+
+| Method                        | What it does                                  |
+|-------------------------------|-----------------------------------------------|
+| `#io`                         | the IO/socket the watcher is attached to     |
+| `#update(:r \| :w \| :rw)`    | change readiness in place                     |
+| `#remove`                     | stop watching; same as `Hypha.poll_remove`    |
+
+```ruby
+watcher = Hypha.poll_add(sock, :r) { |s, cond| ... }
+watcher.update(:rw)   # also wake me on writable
+watcher.remove        # stop watching
+```
+
+`#update` is the canonical way to manage write-readiness notifications:
+subscribe to `:r` only, switch to `:rw` when your outbox grows, switch
+back to `:r` when it drains. All three backends handle this cheaply
+(`WSAAsyncSelect` and `CFFileDescriptorEnableCallBacks` mutate in place;
+GLib drops the old source and adds a new one), so don't be shy about
+calling it.
+
+After `#remove` — or after the block returns falsy and the watcher is
+torn down by the loop — the watcher is dead. The next `#update` or
+`#remove` call raises `IOError`. `#io` keeps working (useful for log
+lines after teardown).
+
+### `Hypha.poll_remove(io)`
+
+Stop watching a fd previously passed
+to `poll_add`. No-op if not being watched. Equivalent to `watcher.remove`
+if you've held onto the Watcher handle.
 
 ### `Hypha.dispatch(*args, &blk)`
 
@@ -382,7 +417,7 @@ C extensions.
 The architectural rule: **only the main thread ever touches the `mrb_state` of Hypha.**
 Hypha methods called from worker threads either dispatch a lambda onto main
 (for value-only operations: `title=`, `html=`, `eval`, etc.) or raise
-(for operations that need the main `mrb_state`: `bind`, `add_native_event`).
+(for operations that need the main `mrb_state`: `bind`, `poll_add`).
 
 Procs cross thread boundaries via cbor: the proc's irep is dumped, sent as
 bytes, and reconstructed on main. The proc must be self-contained — it can

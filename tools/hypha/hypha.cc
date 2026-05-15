@@ -52,6 +52,7 @@
 #include <mruby/variable.h>
 #include <mruby/compile.h>
 #include <mruby/irep.h>
+#include <mruby/io.h>
 
 #include <mruby/cpp_helpers.hpp>
 #include <mruby/fast_json.h>
@@ -327,7 +328,7 @@ hypha_bind_on_main(mrb_state* mrb, webview::webview* wv,
 
     /* Re-bind: just swap the proc, no need to call wv->bind again
      * (which would return WEBVIEW_ERROR_DUPLICATE). */
-    if (!mrb_nil_p(mrb_hash_get(mrb, bh, mrb_symbol_value(name_sym)))) {
+    if (mrb_proc_p(mrb_hash_fetch(mrb, bh, mrb_symbol_value(name_sym), mrb_undef_value()))) {
         mrb_hash_set(mrb, bh, mrb_symbol_value(name_sym), proc);
         return;
     }
@@ -351,7 +352,7 @@ hypha_bind_async_on_main(mrb_state* mrb, webview::webview* wv,
     mrb_value bh = async_bindings_hash(mrb);
 
     /* Re-bind: swap the proc in place. */
-    if (!mrb_nil_p(mrb_hash_get(mrb, bh, mrb_symbol_value(name_sym)))) {
+    if (mrb_proc_p(mrb_hash_fetch(mrb, bh, mrb_symbol_value(name_sym), mrb_undef_value()))) {
         mrb_hash_set(mrb, bh, mrb_symbol_value(name_sym), proc);
         return;
     }
@@ -373,8 +374,8 @@ hypha_unbind_on_main(mrb_state* mrb, webview::webview* wv, mrb_sym name_sym,
     mrb_value sym_v = mrb_symbol_value(name_sym);
     mrb_value sync_h = bindings_hash(mrb);
     mrb_value async_h = async_bindings_hash(mrb);
-    bool in_sync = !mrb_nil_p(mrb_hash_get(mrb, sync_h, sym_v));
-    bool in_async = !mrb_nil_p(mrb_hash_get(mrb, async_h, sym_v));
+    bool in_sync = mrb_proc_p(mrb_hash_fetch(mrb, sync_h, sym_v, mrb_undef_value()));
+    bool in_async = mrb_proc_p(mrb_hash_fetch(mrb, async_h, sym_v, mrb_undef_value()));
 
     auto err = wv->unbind(name);
     hypha_check_result(mrb, err);
@@ -501,6 +502,14 @@ hypha_cond_to_sym(unsigned int conds)
     return MRB_SYM(r);  /* bare error-less wakeups default to :r */
 }
 
+/* Hypha::Watcher#io -- the IO/socket the watcher was attached to.
+ * Always readable, even after the watcher has been removed. */
+static mrb_value
+mrb_hypha_watcher_io(mrb_state* mrb, mrb_value self)
+{
+    return mrb_iv_get(mrb, self, MRB_SYM(fd));
+}
+
 #ifdef WEBVIEW_GTK
 #include <glib-unix.h>
 
@@ -515,7 +524,7 @@ struct mrb_hypha_fd_ud {
     }
 };
 
-MRB_CPP_DEFINE_TYPE(mrb_hypha_fd_ud, Hypha_FDUD);
+MRB_CPP_DEFINE_TYPE(mrb_hypha_fd_ud, Hypha_Watcher);
 
 static gboolean
 on_fd_ready(gint /*fd*/, GIOCondition condition, gpointer user_data)
@@ -556,7 +565,7 @@ hypha_fdud_init(mrb_state* mrb, mrb_value self)
     return self;
 }
 
-void
+mrb_value
 hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
     mrb_value fd_obj, mrb_value blk, unsigned int mask)
 {
@@ -564,10 +573,10 @@ hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
         MRB_TT_INTEGER, MRB_SYM(fileno)));
 
     struct RClass* hypha = mrb_module_get_id(mrb, MRB_SYM(Hypha));
-    struct RClass* fdud_cls = mrb_class_get_under_id(mrb, hypha, MRB_SYM(_FDUD));
+    struct RClass* watcher_cls = mrb_class_get_under_id(mrb, hypha, MRB_SYM(Watcher));
 
     mrb_value argv[] = { fd_obj, blk };
-    mrb_value ud_obj = mrb_obj_new(mrb, fdud_cls, 2, argv);
+    mrb_value ud_obj = mrb_obj_new(mrb, watcher_cls, 2, argv);
     mrb_hash_set(mrb, fds_hash(mrb), fd_obj, ud_obj);
 
     auto* ud = mrb_cpp_get<mrb_hypha_fd_ud>(mrb, ud_obj);
@@ -578,6 +587,45 @@ hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
         cond = (GIOCondition)(cond | G_IO_OUT | G_IO_ERR);
 
     ud->id = g_unix_fd_add(fd, cond, on_fd_ready, DATA_PTR(ud_obj));
+    return ud_obj;
+}
+
+/* Hypha::Watcher#update(:r | :w | :rw) -- mutate readiness in place by
+ * tearing down the GSource and re-arming with the new condition mask.
+ * Raises IOError if the watcher has already been removed. */
+static mrb_value
+mrb_hypha_watcher_update(mrb_state* mrb, mrb_value self)
+{
+    auto* ud = mrb_cpp_get<mrb_hypha_fd_ud>(mrb, self);
+    if (ud->id == 0) mrb_raise(mrb, E_IO_ERROR, "watcher already removed");
+
+    mrb_value readiness;
+    mrb_get_args(mrb, "o", &readiness);
+    unsigned int mask = hypha_parse_readiness(mrb, readiness);
+
+    GIOCondition cond = (GIOCondition)0;
+    if (mask & HYPHA_FD_READ)
+        cond = (GIOCondition)(cond | G_IO_IN  | G_IO_HUP | G_IO_ERR);
+    if (mask & HYPHA_FD_WRITE)
+        cond = (GIOCondition)(cond | G_IO_OUT | G_IO_ERR);
+
+    int fd = (int)mrb_integer(mrb_type_convert(mrb, ud->fd,
+        MRB_TT_INTEGER, MRB_SYM(fileno)));
+    g_source_remove(ud->id);
+    ud->id = g_unix_fd_add(fd, cond, on_fd_ready, DATA_PTR(self));
+    return self;
+}
+
+/* Hypha::Watcher#remove -- stop watching, tear down the GSource. */
+static mrb_value
+mrb_hypha_watcher_remove(mrb_state* mrb, mrb_value self)
+{
+    auto* ud = mrb_cpp_get<mrb_hypha_fd_ud>(mrb, self);
+    if (ud->id == 0) mrb_raise(mrb, E_IO_ERROR, "watcher already removed");
+    g_source_remove(ud->id);
+    ud->id = 0;
+    mrb_hash_delete_key(mrb, fds_hash(mrb), ud->fd);
+    return mrb_nil_value();
 }
 
 void
@@ -662,7 +710,7 @@ hypha_fdud_init(mrb_state* mrb, mrb_value self)
     return self;
 }
 
-void
+mrb_value
 hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
     mrb_value fd_obj, mrb_value blk, unsigned int mask)
 {
@@ -670,10 +718,10 @@ hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
         MRB_TT_INTEGER, MRB_SYM(fileno)));
 
     struct RClass* hypha = mrb_module_get_id(mrb, MRB_SYM(Hypha));
-    struct RClass* fdud_cls = mrb_class_get_under_id(mrb, hypha, MRB_SYM(_FDUD));
+    struct RClass* watcher_cls = mrb_class_get_under_id(mrb, hypha, MRB_SYM(Watcher));
 
     mrb_value argv[] = { fd_obj, blk };
-    mrb_value ud_obj = mrb_obj_new(mrb, fdud_cls, 2, argv);
+    mrb_value ud_obj = mrb_obj_new(mrb, watcher_cls, 2, argv);
     mrb_hash_set(mrb, fds_hash(mrb), fd_obj, ud_obj);
 
     auto* ud = mrb_cpp_get<mrb_hypha_fd_ud>(mrb, ud_obj);
@@ -699,6 +747,47 @@ hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
         mrb_raise(mrb, E_RUNTIME_ERROR, "CFFileDescriptorCreateRunLoopSource failed");
     }
     CFRunLoopAddSource(CFRunLoopGetMain(), ud->src, kCFRunLoopCommonModes);
+    return ud_obj;
+}
+
+/* Hypha::Watcher#update(:r | :w | :rw) -- true in-place mask change via
+ * CFFileDescriptorDisableCallBacks + EnableCallBacks. */
+static mrb_value
+mrb_hypha_watcher_update(mrb_state* mrb, mrb_value self)
+{
+    auto* ud = mrb_cpp_get<mrb_hypha_fd_ud>(mrb, self);
+    if (!ud->cf_fd) mrb_raise(mrb, E_IO_ERROR, "watcher already removed");
+
+    mrb_value readiness;
+    mrb_get_args(mrb, "o", &readiness);
+    unsigned int mask = hypha_parse_readiness(mrb, readiness);
+
+    CFOptionFlags cb = 0;
+    if (mask & HYPHA_FD_READ)  cb |= kCFFileDescriptorReadCallBack;
+    if (mask & HYPHA_FD_WRITE) cb |= kCFFileDescriptorWriteCallBack;
+
+    CFFileDescriptorDisableCallBacks(ud->cf_fd, ud->rearm_mask);
+    ud->rearm_mask = cb;
+    CFFileDescriptorEnableCallBacks(ud->cf_fd, cb);
+    return self;
+}
+
+/* Hypha::Watcher#remove -- tear down CFFileDescriptor + RunLoopSource. */
+static mrb_value
+mrb_hypha_watcher_remove(mrb_state* mrb, mrb_value self)
+{
+    auto* ud = mrb_cpp_get<mrb_hypha_fd_ud>(mrb, self);
+    if (!ud->cf_fd) mrb_raise(mrb, E_IO_ERROR, "watcher already removed");
+    if (ud->src) {
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), ud->src, kCFRunLoopCommonModes);
+        CFRelease(ud->src);
+        ud->src = nullptr;
+    }
+    CFFileDescriptorInvalidate(ud->cf_fd);
+    CFRelease(ud->cf_fd);
+    ud->cf_fd = nullptr;
+    mrb_hash_delete_key(mrb, fds_hash(mrb), ud->fd);
+    return mrb_nil_value();
 }
 
 void
@@ -878,7 +967,7 @@ hypha_fdud_init(mrb_state* mrb, mrb_value self)
     return self;
 }
 
-void
+mrb_value
 hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
     mrb_value fd_obj, mrb_value blk, unsigned int mask)
 {
@@ -897,9 +986,9 @@ hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
     HWND hwnd = get_or_create_hypha_wnd(mrb);
 
     struct RClass* hypha = mrb_module_get_id(mrb, MRB_SYM(Hypha));
-    struct RClass* fdud_cls = mrb_class_get_under_id(mrb, hypha, MRB_SYM(_FDUD));
+    struct RClass* watcher_cls = mrb_class_get_under_id(mrb, hypha, MRB_SYM(Watcher));
     mrb_value argv[] = { fd_obj, blk };
-    mrb_value ud_obj = mrb_obj_new(mrb, fdud_cls, 2, argv);
+    mrb_value ud_obj = mrb_obj_new(mrb, watcher_cls, 2, argv);
     mrb_hash_set(mrb, fds_hash(mrb), fd_obj, ud_obj);
 
     auto* ud = mrb_cpp_get<mrb_hypha_fd_ud>(mrb, ud_obj);
@@ -920,6 +1009,44 @@ hypha_add_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
         mrb_raisef(mrb, E_RUNTIME_ERROR,
             "WSAAsyncSelect failed: %d", (mrb_int)err);
     }
+    return ud_obj;
+}
+
+/* Hypha::Watcher#update(:r | :w | :rw) -- WSAAsyncSelect replaces the
+ * event mask atomically. Raises IOError if removed. */
+static mrb_value
+mrb_hypha_watcher_update(mrb_state* mrb, mrb_value self)
+{
+    auto* ud = mrb_cpp_get<mrb_hypha_fd_ud>(mrb, self);
+    if (ud->sock == -1) mrb_raise(mrb, E_IO_ERROR, "watcher already removed");
+
+    mrb_value readiness;
+    mrb_get_args(mrb, "o", &readiness);
+    unsigned int mask = hypha_parse_readiness(mrb, readiness);
+
+    long lEvent = 0;
+    if (mask & HYPHA_FD_READ)  lEvent |= FD_READ | FD_OOB | FD_ACCEPT;
+    if (mask & HYPHA_FD_WRITE) lEvent |= FD_WRITE | FD_CONNECT;
+    lEvent |= FD_CLOSE;
+
+    if (WSAAsyncSelect((SOCKET)ud->sock, ud->hwnd, MRB_HYPHA_WM_FD, lEvent) == SOCKET_ERROR) {
+        mrb_raisef(mrb, E_RUNTIME_ERROR,
+            "WSAAsyncSelect failed: %d", (mrb_int)WSAGetLastError());
+    }
+    return self;
+}
+
+/* Hypha::Watcher#remove -- WSAAsyncSelect(0, 0) and drop from both hashes. */
+static mrb_value
+mrb_hypha_watcher_remove(mrb_state* mrb, mrb_value self)
+{
+    auto* ud = mrb_cpp_get<mrb_hypha_fd_ud>(mrb, self);
+    if (ud->sock == -1) mrb_raise(mrb, E_IO_ERROR, "watcher already removed");
+    WSAAsyncSelect((SOCKET)ud->sock, ud->hwnd, 0, 0);
+    mrb_hash_delete_key(mrb, sockmap_hash(mrb), mrb_int_value(mrb, ud->sock));
+    mrb_hash_delete_key(mrb, fds_hash(mrb), ud->fd);
+    ud->sock = -1;
+    return mrb_nil_value();
 }
 
 void
@@ -1064,19 +1191,21 @@ hint_from_kw(mrb_state* mrb, mrb_value v)
 }
 
 /* Hypha.ready { ... } — register the one-shot hook. Setting a second
- * time replaces the first; clearing happens automatically when fired. */
+ * time raises an error; clearing happens automatically when fired. */
 static mrb_value
 mrb_hypha_ready(mrb_state* mrb, mrb_value /*self*/)
 {
-    mrb_value blk = mrb_nil_value();
-    mrb_get_args(mrb, "&!", &blk);
-    if (mrb_nil_p(blk)) {
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "Hypha.ready requires a block");
+    mrb_value blk = mrb_undef_value();
+    mrb_get_args(mrb, "&", &blk);
+    if (mrb_undef_p(blk)) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
+    }
+	if (!mrb_proc_p(blk)) {
+        mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
     if (g_ready_hook_set) {
-        /* unregister the previous one to allow replacement; rare but cheap */
-        mrb_gc_unregister(mrb, g_ready_hook);
-        g_ready_hook_set = false;
+        /* don't allow resetting Hypha.ready */
+		mrb_raise(mrb, E_RUNTIME_ERROR, "Hypha.ready hook already set");
     }
     mrb_gc_register(mrb, blk);
     g_ready_hook = blk;
@@ -1084,7 +1213,7 @@ mrb_hypha_ready(mrb_state* mrb, mrb_value /*self*/)
     return mrb_nil_value();
 }
 
-/* Hypha.run(title:, size:, debug:, html:, url:, init:) { |hypha| ... }     */
+/* Hypha.run(title:, size:, html:, url:, init:) { |hypha| ... }     */
 static mrb_value
 mrb_hypha_run(mrb_state* mrb, mrb_value self)
 {
@@ -1099,11 +1228,11 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
     g_hypha_used = true;
 
     /* Parse kwargs. We accept all of these as optional keyword arguments. */
-    mrb_value kw_title = mrb_nil_value();
-    mrb_value kw_size = mrb_nil_value();
-    mrb_value kw_html = mrb_nil_value();
-    mrb_value kw_url = mrb_nil_value();
-    mrb_value kw_init = mrb_nil_value();
+    mrb_value kw_title = mrb_undef_value();
+    mrb_value kw_size = mrb_undef_value();
+    mrb_value kw_html = mrb_undef_value();
+    mrb_value kw_url = mrb_undef_value();
+    mrb_value kw_init = mrb_undef_value();
 
     const mrb_sym kw_names[] = {
         MRB_SYM(title), MRB_SYM(size),
@@ -1113,8 +1242,15 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
     mrb_kwargs kwargs = {
         5, 0, kw_names, kw_values, nullptr
     };
-    mrb_value blk = mrb_nil_value();
+
+    mrb_value blk = mrb_undef_value();
     mrb_get_args(mrb, ":&", &kwargs, &blk);
+    if (mrb_undef_p(blk)) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
+    }
+    if (!mrb_proc_p(blk)) {
+        mrb_raise(mrb, E_TYPE_ERROR, "not a block");
+    }
 
     if (!mrb_undef_p(kw_values[0])) kw_title = kw_values[0];
     if (!mrb_undef_p(kw_values[1])) kw_size = kw_values[1];
@@ -1122,7 +1258,7 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
     if (!mrb_undef_p(kw_values[3])) kw_url = kw_values[3];
     if (!mrb_undef_p(kw_values[4])) kw_init = kw_values[4];
 
-    if (!mrb_nil_p(kw_html) && !mrb_nil_p(kw_url)) {
+    if (!mrb_undef_p(kw_html) && !mrb_undef_p(kw_url)) {
         mrb_raise(mrb, E_ARGUMENT_ERROR,
             "Hypha.run accepts either html: or url:, not both");
     }
@@ -1180,53 +1316,44 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
     /* Yield the Hypha module itself to the user's setup block. The user
      * can call h.bind, h.html=, etc. — same methods as Hypha.bind etc.,
      * fast-pathed since we're on main. */
-    if (mrb_proc_p(blk)) {
-        mrb_value hypha_module = mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(Hypha)));
-        struct ctx { mrb_value blk; mrb_value arg; };
-        ctx c{ blk, hypha_module };
+    mrb_value hypha_module = mrb_obj_value(mrb_class_ptr(self));
+    struct ctx_2 { mrb_value blk; mrb_value arg; };
+    ctx_2 c2{ blk, hypha_module };
 
-        mrb_bool err = FALSE;
-        mrb_value exc = mrb_protect_error(mrb,
-            [](mrb_state* m, void* p) -> mrb_value {
-                ctx* c = static_cast<ctx*>(p);
-                return mrb_yield_argv(m, c->blk, 1, &c->arg);
-            },
-            &c, &err);
+    mrb_bool err = FALSE;
+    mrb_value exc = mrb_protect_error(mrb,
+        [](mrb_state* m, void* p) -> mrb_value {
+            ctx_2* c2 = static_cast<ctx_2*>(p);
+            return mrb_yield_argv(m, c2->blk, 1, &c2->arg);
+        },
+        &c2, &err);
 
-        if (err) {
-            /* Setup-block error: tear down webview and re-raise so the
-             * user sees the real error without the run loop ever starting.
-             * mrb_protect_error clears mrb->exc and hands the exception back
-             * via the return value; use that, not mrb->exc. */
-            g_wv.store(nullptr, std::memory_order_release);
-            delete wv;
-            if (mrb_obj_is_kind_of(mrb, exc, mrb->eException_class)) {
-                mrb_exc_raise(mrb, exc);
-            }
-            else {
-                mrb_raise(mrb, E_RUNTIME_ERROR,
-                    "Hypha.run setup block raised a non-exception value");
-            }
-            return mrb_nil_value();   /* unreachable */
+    if (err) {
+        /* Setup-block error: tear down webview and re-raise so the
+         * user sees the real error without the run loop ever starting.
+         * mrb_protect_error clears mrb->exc and hands the exception back
+         * via the return value; use that, not mrb->exc. */
+        g_wv.store(nullptr, std::memory_order_release);
+        delete wv;
+        if (mrb_obj_is_kind_of(mrb, exc, mrb->eException_class)) {
+            mrb_exc_raise(mrb, exc);
         }
+        else {
+            mrb_raise(mrb, E_RUNTIME_ERROR,
+                "Hypha.run setup block raised a non-exception value");
+        }
+        return mrb_nil_value();   /* unreachable */
     }
 
     /* Fire the ready hook (if any) before run() begins pumping. */
     if (g_ready_hook_set) {
-        mrb_value hook = g_ready_hook;
-        mrb_gc_unregister(mrb, hook);
-        g_ready_hook_set = false;
-
-        struct ctx { mrb_value blk; };
-        ctx c{ hook };
-
         mrb_bool err = FALSE;
         mrb_value exc = mrb_protect_error(mrb,
             [](mrb_state* m, void* p) -> mrb_value {
-                ctx* c = static_cast<ctx*>(p);
-                return mrb_yield_argv(m, c->blk, 0, nullptr);
+                return mrb_yield_argv(m, g_ready_hook, 0, nullptr);
             },
-            &c, &err);
+            nullptr, &err);
+        mrb_gc_unregister(mrb, g_ready_hook);
 
         if (err) {
             g_wv.store(nullptr, std::memory_order_release);
@@ -1323,10 +1450,13 @@ mrb_hypha_bind(mrb_state* mrb, mrb_value /*self*/)
     hypha_require_main_state(mrb, "Hypha.bind");
 
     mrb_sym name_sym;
-    mrb_value blk = mrb_nil_value();
+    mrb_value blk = mrb_undef_value();
     mrb_get_args(mrb, "n&", &name_sym, &blk);
-    if (mrb_nil_p(blk)) {
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "Hypha.bind requires a block");
+    if (mrb_undef_p(blk)) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
+    }
+	if (!mrb_proc_p(blk)) {
+        mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
 
     mrb_int name_len;
@@ -1347,10 +1477,13 @@ mrb_hypha_bind_async(mrb_state* mrb, mrb_value /*self*/)
     hypha_require_main_state(mrb, "Hypha.bind_async");
 
     mrb_sym name_sym;
-    mrb_value blk = mrb_nil_value();
+    mrb_value blk = mrb_undef_value();
     mrb_get_args(mrb, "n&", &name_sym, &blk);
-    if (mrb_nil_p(blk)) {
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "Hypha.bind_async requires a block");
+    if (mrb_undef_p(blk)) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
+    }
+    if (!mrb_proc_p(blk)) {
+        mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
 
     mrb_int name_len;
@@ -1388,17 +1521,18 @@ mrb_hypha_add_native_event(mrb_state* mrb, mrb_value /*self*/)
 
     mrb_value fd_obj;
     mrb_value readiness = mrb_nil_value();
-    mrb_value blk = mrb_nil_value();
+    mrb_value blk = mrb_undef_value();
     mrb_get_args(mrb, "o|o&", &fd_obj, &readiness, &blk);
-    if (mrb_nil_p(blk)) {
-        mrb_raise(mrb, E_ARGUMENT_ERROR,
-            "Hypha.add_native_event requires a block");
+    if (mrb_undef_p(blk)) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
+    }
+    if (!mrb_proc_p(blk)) {
+        mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
     unsigned int mask = hypha_parse_readiness(mrb, readiness);
 
     webview::webview* wv = hypha_require_running_local(mrb);
-    hypha_add_native_event_on_main(mrb, wv, fd_obj, blk, mask);
-    return mrb_nil_value();
+    return hypha_add_native_event_on_main(mrb, wv, fd_obj, blk, mask);
 }
 
 /* Hypha.remove_native_event(io) -- main only. */
@@ -1468,13 +1602,21 @@ hypha_install_runtime(mrb_state* mrb)
     mrb_define_class_under_id(mrb, hypha, MRB_SYM(DuplicateError), err);
     mrb_define_class_under_id(mrb, hypha, MRB_SYM(NotFoundError), err);
 
-    /* Hypha._FDUD — internal CData wrapping platform fd-watcher state. */
-    struct RClass* fdud_cls = mrb_define_class_under_id(mrb, hypha,
-        MRB_SYM(_FDUD),
+    /* Hypha::Watcher -- handle returned by Hypha.poll_add (alias
+     * Hypha.add_native_event). Wraps platform fd-watcher state; exposes
+     * #io, #update, #remove. */
+    struct RClass* watcher_cls = mrb_define_class_under_id(mrb, hypha,
+        MRB_SYM(Watcher),
         mrb->object_class);
-    MRB_SET_INSTANCE_TT(fdud_cls, MRB_TT_CDATA);
-    mrb_define_method_id(mrb, fdud_cls, MRB_SYM(initialize),
+    MRB_SET_INSTANCE_TT(watcher_cls, MRB_TT_CDATA);
+    mrb_define_method_id(mrb, watcher_cls, MRB_SYM(initialize),
         hypha_fdud_init, MRB_ARGS_REQ(2));
+    mrb_define_method_id(mrb, watcher_cls, MRB_SYM(io),
+        mrb_hypha_watcher_io, MRB_ARGS_NONE());
+    mrb_define_method_id(mrb, watcher_cls, MRB_SYM(update),
+        mrb_hypha_watcher_update, MRB_ARGS_REQ(1));
+    mrb_define_method_id(mrb, watcher_cls, MRB_SYM(remove),
+        mrb_hypha_watcher_remove, MRB_ARGS_NONE());
 
 #ifdef WEBVIEW_EDGE
     /* Hypha._WndCtx — Windows-only, owns the hidden HWND for fd dispatch. */
@@ -1489,7 +1631,7 @@ hypha_install_runtime(mrb_state* mrb)
     /* Lifecycle entry points. */
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(run),
         mrb_hypha_run,
-        MRB_ARGS_KEY(6, 0) | MRB_ARGS_BLOCK());
+        MRB_ARGS_KEY(5, 0) | MRB_ARGS_BLOCK());
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(ready),
         mrb_hypha_ready, MRB_ARGS_BLOCK());
 
@@ -1505,7 +1647,13 @@ hypha_install_runtime(mrb_state* mrb)
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(add_native_event),
         mrb_hypha_add_native_event,
         MRB_ARGS_ARG(1, 1) | MRB_ARGS_BLOCK());
+    mrb_define_class_method_id(mrb, hypha, MRB_SYM(poll_add),
+        mrb_hypha_add_native_event,
+        MRB_ARGS_ARG(1, 1) | MRB_ARGS_BLOCK());
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(remove_native_event),
+        mrb_hypha_remove_native_event,
+        MRB_ARGS_REQ(1));
+    mrb_define_class_method_id(mrb, hypha, MRB_SYM(poll_remove),
         mrb_hypha_remove_native_event,
         MRB_ARGS_REQ(1));
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(bindings),
@@ -1516,15 +1664,32 @@ hypha_install_runtime(mrb_state* mrb)
         mrb_hypha_handle, MRB_ARGS_OPT(1));
 }
 
+#ifdef _WIN32
+struct WSAGuard {
+    bool ok = false;
+    int  err = 0;
+    WSAGuard() { WSADATA w; err = WSAStartup(MAKEWORD(2, 2), &w); ok = (err == 0); }
+    ~WSAGuard() { if (ok) WSACleanup(); }
+};
+#endif
+
 /* ========================================================================= */
 /* main()                                                                    */
 /* ========================================================================= */
 
 int
-main(int argc, const char* const argv[])
+main(const int argc, const char* const argv[])
 {
+#ifdef _WIN32
+    WSAGuard wsa;
+    if (!wsa.ok) { fprintf(stderr, "WSAStartup failed: %d\n", wsa.err); return 1; }
+#endif
     if (argc > 1 && std::string_view(argv[1]) == "--prewarm") {
-        webview::webview w(false, nullptr);
+        try { webview::webview w(false, nullptr); }
+        catch (const std::exception& e) {
+            fprintf(stderr, "prewarm failed: %s\n", e.what());
+            return 1;
+        }
         return 0;
     }
     mrb_state* mrb = mrb_open();
