@@ -12,29 +12,22 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
   spec.add_dependency 'mruby-mustache', github: 'Asmod4n/mruby-mustache', branch: 'main'
   spec.add_dependency 'typedargs'
   spec.add_dependency 'mruby-proc-irep-ext'
-  spec.add_dependency 'mruby-class-ext', core: 'mruby-class-ext'
+  spec.add_dependency 'mruby-class-ext',  core: 'mruby-class-ext'
   spec.add_dependency 'mruby-string-ext', core: 'mruby-string-ext'
   spec.add_dependency 'mruby-hash-ext',   core: 'mruby-hash-ext'
   spec.add_dependency 'mruby-symbol-ext', core: 'mruby-symbol-ext'
   spec.add_dependency 'mruby-error',      core: 'mruby-error'
   spec.add_dependency 'mruby-proc-ext',   core: 'mruby-proc-ext'
-  spec.add_dependency 'mruby-io',           core: 'mruby-io'
+  spec.add_dependency 'mruby-io',         core: 'mruby-io'
 
   # mruby-fast-json requires UTF-8 string support.
   spec.cc.defines  << 'MRB_UTF8_STRING'
   spec.cxx.defines << 'MRB_UTF8_STRING'
 
   # ------------------------------------------------------------------------
-  # webview source: shipped as a git submodule under vendor/webview. We
-  # compile its full C++ implementation directly into our single .cc
-  # translation unit (no WEBVIEW_HEADER, no WEBVIEW_STATIC) so the
-  # bindings can use the C++ engine class (webview::webview) — std::string
-  # parameters, std::function dispatch / bind callbacks, etc. No CMake
-  # build needed; webview's own master `core/src/webview.cc` is just a
-  # `#include "webview/webview.h"` shim, and our src/mrb_webview.cc does
-  # exactly the same include without the WEBVIEW_HEADER guard.
+  # webview source: shipped as a git submodule under vendor/webview.
   # ------------------------------------------------------------------------
-  webview_dir = ENV['MRUBY_WEBVIEW_DIR'] || File.join(spec.dir, 'vendor', 'webview')
+  webview_dir = ENV['HYPHA_WEBVIEW_DIR'] || File.join(spec.dir, 'vendor', 'webview')
   webview_inc = File.join(webview_dir, 'core', 'include')
 
   unless File.directory?(webview_inc)
@@ -47,9 +40,9 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
 
   unless File.directory?(webview_inc)
     abort <<~MSG
-      [mruby-webview] webview source not found at #{webview_dir}.
+      [hypha-mrb] webview source not found at #{webview_dir}.
       Run `git submodule update --init --recursive` in the gem directory,
-      or set MRUBY_WEBVIEW_DIR to point at an existing webview checkout.
+      or set HYPHA_WEBVIEW_DIR to point at an existing webview checkout.
     MSG
   end
 
@@ -79,19 +72,53 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
     end
     spec.linker.libraries.concat(%w[advapi32 ole32 shell32 shlwapi user32 version])
 
-    pkg_dir = Dir.glob(File.join(spec.dir, 'packages', 'Microsoft.Web.WebView2.*')).max
-    pkg_dir ||= ENV['WEBVIEW2_SDK']
-    abort "[mruby-webview] WebView2 SDK not found — run: nuget install Microsoft.Web.WebView2 -OutputDirectory packages" unless pkg_dir
+    # ----------------------------------------------------------------------
+    # WebView2 SDK: dotnet restore against a throwaway csproj. dotnet
+    # fetches the latest Microsoft.Web.WebView2, verifies Microsoft's
+    # signature, and extracts to ./packages/microsoft.web.webview2/<ver>/.
+    # Build only reads native headers — no .NET runtime, no C# code.
+    # Override with WEBVIEW2_SDK=/path/to/microsoft.web.webview2/<version>
+    # ----------------------------------------------------------------------
+    sdk_header_rel = File.join('build', 'native', 'include', 'WebView2.h')
+    pkg_dir        = ENV['WEBVIEW2_SDK']
+
+    unless pkg_dir
+      require 'tmpdir'
+
+      packages_root = File.join(spec.dir, 'packages')
+      FileUtils.mkdir_p(packages_root)
+
+      Dir.mktmpdir('hypha-webview2-restore') do |tmp|
+        File.write(File.join(tmp, 'webview2.csproj'), <<~XML)
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net8.0</TargetFramework>
+              <NoWarn>NU1701</NoWarn>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Microsoft.Web.WebView2" Version="*" />
+            </ItemGroup>
+          </Project>
+        XML
+        sh 'dotnet', 'restore', tmp, '--packages', packages_root
+      end
+
+      pkg_dir = Dir.glob(File.join(packages_root, 'microsoft.web.webview2', '*'))
+                   .reject { |d| File.basename(d).include?('-') }
+                   .select { |d| File.exist?(File.join(d, sdk_header_rel)) }
+                   .max_by { |d| File.basename(d).split('.').map(&:to_i) }
+      abort "[hypha-mrb] dotnet restore ran but no microsoft.web.webview2 in #{packages_root}" unless pkg_dir
+      puts "[hypha-mrb] using WebView2 SDK at #{pkg_dir}"
+    end
 
     sdk_inc = File.join(pkg_dir, 'build', 'native', 'include')
-    abort "[mruby-webview] WebView2.h not found at #{sdk_inc}" unless File.exist?(File.join(sdk_inc, 'WebView2.h'))
+    abort "[hypha-mrb] WebView2.h not found at #{sdk_inc}" unless File.exist?(File.join(sdk_inc, 'WebView2.h'))
 
     spec.cc.include_paths  << sdk_inc
     spec.cxx.include_paths << sdk_inc
 
     # ----------------------------------------------------------------------
-    # Compile and link the Win32 manifest so the final .exe declares
-    # UTF-8 active codepage, long paths, per-monitor DPI v2, and a
+    # Win32 manifest: UTF-8 codepage, long paths, per-monitor DPI v2,
     # Common-Controls 6 dependency for themed menus.
     # ----------------------------------------------------------------------
     rc_src     = File.join(spec.dir, 'data', 'mruby-webview.rc')
@@ -122,18 +149,18 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
     spec.linker.libraries << 'c++'
 
   else
-    pkg = ENV['MRUBY_WEBVIEW_PKG']
+    pkg = ENV['HYPHA_WEBVIEW_PKG']
     pkg ||= %w[gtk4 webkitgtk-6.0].all?       { |p| system("pkg-config --exists #{p}") } ? 'gtk4 webkitgtk-6.0'      : nil
     pkg ||= %w[gtk+-3.0 webkit2gtk-4.1].all?  { |p| system("pkg-config --exists #{p}") } ? 'gtk+-3.0 webkit2gtk-4.1' : nil
     pkg ||= %w[gtk+-3.0 webkit2gtk-4.0].all?  { |p| system("pkg-config --exists #{p}") } ? 'gtk+-3.0 webkit2gtk-4.0' : nil
 
     abort <<~MSG unless pkg
-      [mruby-webview] no GTK + WebKitGTK development packages found via pkg-config.
+      [hypha-mrb] no GTK + WebKitGTK development packages found via pkg-config.
       Install one of:
         - gtk4 + webkitgtk-6.0   (Debian/Ubuntu: libgtk-4-dev libwebkitgtk-6.0-dev)
         - gtk+-3.0 + webkit2gtk-4.1   (libgtk-3-dev libwebkit2gtk-4.1-dev)
         - gtk+-3.0 + webkit2gtk-4.0   (libgtk-3-dev libwebkit2gtk-4.0-dev)
-      Or set MRUBY_WEBVIEW_PKG to a custom pkg-config package list.
+      Or set HYPHA_WEBVIEW_PKG to a custom pkg-config package list.
     MSG
 
     `pkg-config --cflags #{pkg}`.strip.split(/\s+/).reject(&:empty?).each do |f|
