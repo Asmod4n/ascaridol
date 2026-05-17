@@ -1,4 +1,9 @@
+require 'rake'
+
 MRuby::Gem::Specification.new('hypha-mrb') do |spec|
+  class << spec
+    attr_accessor :hypha_main
+  end
   spec.license = 'MIT'
   spec.author  = 'Hendrik Beskow'
   spec.summary = 'A small Framework to build native desktop apps in mruby'
@@ -20,7 +25,21 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
   spec.add_dependency 'mruby-proc-ext',   core: 'mruby-proc-ext'
   spec.add_dependency 'mruby-io',         core: 'mruby-io'
   spec.add_dependency 'mruby-socket',     core: 'mruby-socket'
+  spec.add_dependency 'mruby-bin-mrbc',   core: 'mruby-bin-mrbc'
 
+  gem_root  = File.dirname(__FILE__)
+  out_c_abs = File.expand_path('tools/hypha/main.c', gem_root)
+  stub_rb   = File.expand_path('tools/hypha/stub.rb', gem_root)
+
+  ft = Rake::FileTask.define_task(out_c_abs => build.mrbcfile) do
+    script_abs = ENV['HYPHA_SCRIPT'] || spec.hypha_main || stub_rb
+    abort "[hypha] script not found: #{script_abs}" unless File.exist?(script_abs)
+
+    next if File.exist?(out_c_abs) && File.mtime(out_c_abs) >= File.mtime(script_abs)
+
+    sh build.mrbcfile, '-g', '-Bhypha_main', '-o', out_c_abs, script_abs
+  end
+  def ft.needed?; true; end
 
   # ------------------------------------------------------------------------
   # webview source: shipped as a git submodule under vendor/webview.

@@ -6,5 +6,7 @@ MRuby::Build.new do |conf|
   conf.cxx.defines << 'MRB_UTF8_STRING' << 'MRB_HIGH_PROFILE'
   conf.enable_test
   conf.enable_debug
-  conf.gem File.expand_path(File.dirname(__FILE__))
+  conf.gem(File.expand_path(File.dirname(__FILE__))) do |hypha|
+    hypha.hypha_main = "../example/hello.rb"
+  end
 end

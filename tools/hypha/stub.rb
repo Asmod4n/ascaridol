@@ -1,6 +1,12 @@
 error = "Hypha runtime is installed.\n"
 error += "\n"
 error += "This binary has no application embedded.\n"
-error += "Build an app with: rake compile[path/to/app.rb]\n"
+error += "Set hypha_main in your build_config.rb:\n"
+error += "\n"
+error += "  conf.gem github: 'Asmod4n/hypha-mrb' do |hypha|\n"
+error += "    hypha.hypha_main = '../app/main.rb'\n"
+error += "  end\n"
+error += "\n"
+error += "Or override at build time: HYPHA_SCRIPT=path/to/app.rb rake\n"
 error += "See: https://github.com/Asmod4n/hypha-mrb"
 raise NotImplementedError, error
