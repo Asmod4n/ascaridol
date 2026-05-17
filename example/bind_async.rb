@@ -1,3 +1,17 @@
+# Async bind example for Hypha — Promise resolution from Ruby.
+#
+# Build:
+#   conf.gem '<path-to-hypha-mrb>' do |hypha|
+#     hypha.hypha_main = File.expand_path('example/bind_async.rb', __dir__)
+#   end
+#   rake
+#
+# Run:
+#   mruby/build/host/bin/hypha
+#
+# Shows: bind_async to return a hanging Promise to JS, then resolve it
+# later with Hypha.resolve. Demonstrates FIFO queueing of waiters.
+
 Hypha.run(title: "resolve demo", size: [400, 200]) do |h|
   @pending = []
   @counter = 0

@@ -1,12 +1,17 @@
-# example/echo_server.rb
-#
 # TCP echo server demonstrating Hypha.poll_add and Watcher#update.
 # The watcher toggles between :r (read only) and :rw (read + write)
 # based on outbox state, so we only get write-ready wakeups when there
 # are actually bytes queued to send.
 #
-#   $ hypha example/echo_server.rb
-#   $ nc 127.0.0.1 5000           # another terminal
+# Build:
+#   conf.gem '<path-to-hypha-mrb>' do |hypha|
+#     hypha.hypha_main = File.expand_path('example/echo_server.rb', __dir__)
+#   end
+#   rake
+#
+# Run:
+#   mruby/build/host/bin/hypha
+#   nc 127.0.0.1 5000             # in another terminal
 #
 # (On Windows, ncat from nmap works; PowerShell has no built-in nc.)
 

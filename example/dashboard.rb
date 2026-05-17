@@ -1,6 +1,13 @@
-# A live introspection dashboard for mruby + mruby-webview.
+# Live introspection dashboard for Hypha.
 #
-# Run with:  ./bin/mruby examples/dashboard/app.rb
+# Build:
+#   conf.gem '<path-to-hypha-mrb>' do |hypha|
+#     hypha.hypha_main = File.expand_path('example/dashboard.rb', __dir__)
+#   end
+#   rake
+#
+# Run:
+#   mruby/build/host/bin/hypha
 #
 # Demonstrates:
 #   - rb-indicator: busy bar shown while a Ruby binding runs
@@ -9,9 +16,8 @@
 #   - Surfacing exceptions raised from Ruby as visible errors
 #   - Running an arbitrary Ruby snippet from the UI and showing the result
 #
-# Pure stdlib — no extra mgems required. This is the example to read first
-# if you want to see how to invoke heavier Ruby work from htmx and present
-# the results.
+# Pure stdlib — no extra mgems required. Read this one first if you want
+# to see how to invoke heavier Ruby work from htmx and present results.
 
 # ---- collectors -----------------------------------------------------------
 

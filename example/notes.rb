@@ -1,11 +1,16 @@
-# A persistent note-taking app on top of mruby-webview + mruby-lmdb + mruby-cbor.
+# Persistent note-taking app for Hypha, using mruby-lmdb + mruby-cbor.
 #
-# Run with:  ./bin/mruby examples/notes/app.rb
+# Build:
+#   conf.gem '<path-to-hypha-mrb>' do |hypha|
+#     hypha.hypha_main = File.expand_path('example/notes.rb', __dir__)
+#   end
+#   rake
 #
-# Required mgems in build_config.rb:
-#   conf.gem github: 'asmod4n/mruby-webview'
-#   conf.gem github: 'asmod4n/mruby-lmdb'
-#   conf.gem github: 'asmod4n/mruby-cbor'
+# Run:
+#   mruby/build/host/bin/hypha
+#
+# Dependencies are pulled in transitively by hypha-mrb (mruby-lmdb,
+# mruby-cbor), so no extra `conf.gem` lines are needed.
 #
 # Demonstrates:
 #   - A real, persistent app: notes survive restarts
@@ -13,10 +18,6 @@
 #   - Debounced search-as-you-type via rb-trigger="input changed delay:200ms"
 #   - Master/detail layout where edits round-trip through Ruby
 #   - Optimistic title updates with full-form re-render on save
-
-# LMDB store directory. Edit this constant if you want it elsewhere — mruby
-# doesn't always ship ENV/Dir builtins, so we keep this dead-simple and
-# resolve relative to the working directory.
 DB_DIR = "./mruby-webview-notes"
 
 # ---- storage layer --------------------------------------------------------

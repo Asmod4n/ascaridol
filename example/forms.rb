@@ -1,6 +1,13 @@
-# Form validation patterns in mruby-webview.
+# Form validation patterns in Hypha.
 #
-# Run with:  ./bin/mruby examples/forms.rb
+# Build:
+#   conf.gem '<path-to-hypha-mrb>' do |hypha|
+#     hypha.hypha_main = File.expand_path('example/forms.rb', __dir__)
+#   end
+#   rake
+#
+# Run:
+#   mruby/build/host/bin/hypha
 #
 # Demonstrates:
 #   - Inline field validation (rb-post on input blur)
@@ -8,8 +15,8 @@
 #   - Form submit with full-form replace on success
 #   - Server-driven password strength meter
 #
-# The mruby-router extension handles `rb-trigger="blur"` so individual
-# fields can validate themselves without wiring custom JS.
+# Hypha's html_router handles `rb-trigger="blur"` so individual fields
+# can validate themselves without wiring custom JS.
 
 $users = ["alice", "bob"] # already-taken handles
 

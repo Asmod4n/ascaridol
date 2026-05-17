@@ -1,7 +1,21 @@
-# Tabs + modal dialogs in hypha-mrb, htmx-style, with mruby-mustache.
+# Tabs + modal dialogs in Hypha, htmx-style, with mruby-mustache.
 #
-# Same behavior as the string-concat version. Presentation lives in
-# pre-compiled Mustache templates; Ruby only prepares view data.
+# Build:
+#   conf.gem '<path-to-hypha-mrb>' do |hypha|
+#     hypha.hypha_main = File.expand_path('example/tabs_and_modals.rb', __dir__)
+#   end
+#   rake
+#
+# Run:
+#   mruby/build/host/bin/hypha
+#
+# Demonstrates:
+#   - Server-rendered tab switching (no client state)
+#   - Modal dialogs composed from HTML fragments
+#   - Pre-compiled Mustache templates as partials
+#   - rb-swap variants: outerHTML, beforeend, and synthetic delete
+#
+# mruby-mustache is a transitive dep of hypha-mrb — no extra conf.gem needed.
 
 PROJECTS = [
   { id: 1, name: 'atlas',  status: 'shipping',  owner: 'alice', desc: 'Cross-platform GUI runtime built on system webviews. Now in beta.' },
