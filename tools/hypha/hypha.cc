@@ -91,6 +91,24 @@ static bool      g_ready_fired    = false;
 
 MRB_CPP_DEFINE_TYPE(webview::webview, Webview)
 
+/* HyphaWVOwner — tiny CDATA wrapper around a webview::webview*.
+ * webview::webview is created with plain new so GObject uses its own
+ * allocator. The owner struct is what the GC watches; its destructor
+ * clears g_wv and deletes the webview on any raise before explicit
+ * happy-path cleanup. */
+struct HyphaWVOwner {
+    webview::webview* wv = nullptr;
+    ~HyphaWVOwner() {
+        if (wv) {
+            g_wv.store(nullptr, std::memory_order_release);
+            delete wv;
+            wv = nullptr;
+        }
+    }
+};
+
+MRB_CPP_DEFINE_TYPE(HyphaWVOwner, HyphaWVOwner)
+
 
 /* ========================================================================= */
 /* Bind machinery                                                            */
@@ -404,15 +422,6 @@ hypha_bindings_on_main(mrb_state* mrb)
         }
     }
     return result;
-}
-
-mrb_value
-hypha_window_handle_on_main(mrb_state* mrb, webview::webview* wv)
-{
-    auto r = wv->window();
-    if (!r.ok()) return mrb_nil_value();
-    void* p = r.value();
-    return p ? mrb_cptr_value(mrb, p) : mrb_nil_value();
 }
 
 mrb_value
@@ -1279,25 +1288,31 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
             "Hypha.run accepts either html: or url:, not both");
     }
 
-    /* Construct the webview. Constructor args (debug + parent window)
-     * are baked in here; we don't expose a window: kwarg for now. */
-    webview::webview* wv;
+    /* Create owner CDATA first — GC safety net for any raise before
+     * explicit cleanup. webview::webview uses plain new so GObject
+     * uses its own allocator as normal. */
+    struct RClass* owner_cls = mrb_class_get_under_id(mrb,
+        mrb_module_get_id(mrb, MRB_SYM(Hypha)), MRB_SYM(_WVOwner));
+    mrb_value owner_val = mrb_obj_new(mrb, owner_cls, 0, nullptr);
+    auto* owner = mrb_cpp_new<HyphaWVOwner>(mrb, owner_val);
+    mrb_gc_register(mrb, owner_val);
+
     try {
 #ifdef MRB_DEBUG
-        wv = new webview::webview(true, nullptr);
+        owner->wv = new webview::webview(true, nullptr);
 #else
-        wv = new webview::webview(false, nullptr);
+        owner->wv = new webview::webview(false, nullptr);
 #endif
-        
     }
     catch (const webview::exception& e) {
+        mrb_gc_unregister(mrb, owner_val);
+        mrb_cpp_delete(mrb, owner);
         hypha_check(mrb, e.error().code(), e.error().message());
         return mrb_nil_value();   /* unreachable */
     }
-
-    /* Publish g_wv before any helper that might dispatch can run.
-     * Release ordering pairs with workers' acquire-loads. */
+    webview::webview* wv = owner->wv;
     g_wv.store(wv, std::memory_order_release);
+
     hypha_reset_for_run(mrb);
 
     /* Apply kwargs synchronously (we're on main, no dispatch needed). */
@@ -1346,12 +1361,9 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
         &c2, &err);
 
     if (err) {
-        /* Setup-block error: tear down webview and re-raise so the
-         * user sees the real error without the run loop ever starting.
-         * mrb_protect_error clears mrb->exc and hands the exception back
-         * via the return value; use that, not mrb->exc. */
-        g_wv.store(nullptr, std::memory_order_release);
-        delete wv;
+        mrb_gc_unregister(mrb, owner_val);
+        mrb_cpp_delete(mrb, owner);   /* dtor: g_wv=nullptr, delete wv */
+        mrb_data_init(owner_val, nullptr, nullptr);
         if (mrb_obj_is_kind_of(mrb, exc, mrb->eException_class)) {
             mrb_exc_raise(mrb, exc);
         }
@@ -1362,56 +1374,23 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
         return mrb_nil_value();   /* unreachable */
     }
 
-    /* Wire up Hypha.ready to fire on every DOMContentLoaded.
-     *
-     * We inject a hidden init script (runs before the page's own JS) that
-     * listens for DOMContentLoaded and then calls our hidden binding.  The
-     * binding callback runs on the main thread (webview guarantees this) so
-     * it can invoke mruby directly without dispatch.
-     *
-     * We always inject the init script so the hidden binding name is wired;
-     * if no ready hook is registered the binding just returns immediately.
-     * Exceptions inside the hook are stashed and re-raised after wv->run()
-     * returns so the run loop still has a chance to shut down cleanly. */
-    {
-        hypha_check_result(mrb, wv->init(
-            "(function(){"
-            "  document.addEventListener('DOMContentLoaded',function(){"
-            "    if(typeof window['" HYPHA_PAGE_READY_BINDING "'] === 'function'){"
-            "      window['" HYPHA_PAGE_READY_BINDING "']().catch(function(){});"
-            "    }"
-            "  });"
-            "})();"
-        ));
+    /* Wire Hypha.ready to fire on the first DOMContentLoaded of this run.
+     * Registered as a normal binding so it goes through invoke_bound_proc
+     * like all user bindings. g_ready_fired enforces one-shot-per-run. */
+    hypha_check_result(mrb, wv->init(
+        "(function(){"
+        "  document.addEventListener('DOMContentLoaded',function(){"
+        "    if(typeof window._hypha_ready==='function'){"
+        "      window._hypha_ready().catch(function(){});"
+        "    }"
+        "  });"
+        "})();"
+    ));
 
-        /* g_pending_ready_exc: stash an exception from inside the bind
-         * callback (can't longjmp out of a webview callback safely). */
-        static mrb_value s_pending_exc;
-        s_pending_exc = mrb_nil_value();
-
-        hypha_check_result(mrb, wv->bind(HYPHA_PAGE_READY_BINDING,
-            [mrb](const std::string& /*seq*/,
-                  const std::string& /*req*/,
-                  void* /*arg*/) {
-                if (!g_ready_hook_set || g_ready_fired) return;
-                g_ready_fired = true;
-                mrb_int ai = mrb_gc_arena_save(mrb);
-                mrb_bool err = FALSE;
-                mrb_value exc = mrb_protect_error(mrb,
-                    [](mrb_state* m, void* p) -> mrb_value {
-                        return mrb_yield_argv(m, g_ready_hook, 0, nullptr);
-                    },
-                    nullptr, &err);
-                mrb_gc_arena_restore(mrb, ai);
-                if (err && mrb_nil_p(s_pending_exc)) {
-                    /* Keep first exception; terminate so run() exits. */
-                    mrb_gc_register(mrb, exc);
-                    s_pending_exc = exc;
-                    webview_terminate(g_wv.load(std::memory_order_acquire));
-                }
-            },
-            nullptr
-        ));
+    if (g_ready_hook_set) {
+        mrb_value name  = mrb_symbol_value(MRB_SYM(_hypha_ready));
+        mrb_value hypha = mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(Hypha)));
+        mrb_funcall_with_block(mrb, hypha, MRB_SYM(bind), 1, &name, g_ready_hook);
     }
 
 /* Block here until terminate() is called or the window closes.
@@ -1431,12 +1410,10 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
             return mrb_nil_value();
         },
         &c, &run_err);
-    webview::webview* g_wv_raw = wv;   /* capture before g_wv is nulled */
 
-    /* Shutdown: clear g_wv before destroying so any in-flight worker
-     * dispatches see null and bail out cleanly. */
-    g_wv.store(nullptr, std::memory_order_release);
-    delete g_wv_raw;
+    mrb_gc_unregister(mrb, owner_val);
+    mrb_cpp_delete(mrb, owner);   /* dtor: g_wv=nullptr, delete wv */
+    mrb_data_init(owner_val, nullptr, nullptr);
 
     if (run_err) {
         if (mrb_obj_is_kind_of(mrb, run_exc, mrb->eException_class)) {
@@ -1602,15 +1579,6 @@ mrb_hypha_bindings(mrb_state* mrb, mrb_value /*self*/)
     return hypha_bindings_on_main(mrb);
 }
 
-/* Hypha.window_handle -- mrb_cptr or nil. Main only. */
-static mrb_value
-mrb_hypha_window_handle(mrb_state* mrb, mrb_value /*self*/)
-{
-    hypha_require_main_state(mrb, "Hypha.window_handle");
-    webview::webview* wv = hypha_require_running_local(mrb);
-    return hypha_window_handle_on_main(mrb, wv);
-}
-
 /* Hypha.handle(kind=:window) -- :window | :widget | :browser_controller. */
 static mrb_value
 mrb_hypha_handle(mrb_state* mrb, mrb_value /*self*/)
@@ -1672,6 +1640,13 @@ hypha_install_runtime(mrb_state* mrb)
         hypha_wnd_ctx_init, MRB_ARGS_NONE());
 #endif
 
+    /* Internal CDATA wrapper for HyphaWVOwner — GC safety net. */
+    {
+        struct RClass* owner_cls = mrb_define_class_under_id(mrb, hypha,
+            MRB_SYM(_WVOwner), mrb->object_class);
+        MRB_SET_INSTANCE_TT(owner_cls, MRB_TT_CDATA);
+    }
+
     /* Lifecycle entry points. */
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(run),
         mrb_hypha_run,
@@ -1701,8 +1676,6 @@ hypha_install_runtime(mrb_state* mrb)
         MRB_ARGS_REQ(1));
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(bindings),
         mrb_hypha_bindings, MRB_ARGS_NONE());
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(window_handle),
-        mrb_hypha_window_handle, MRB_ARGS_NONE());
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(handle),
         mrb_hypha_handle, MRB_ARGS_OPT(1));
 }

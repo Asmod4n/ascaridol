@@ -20,6 +20,7 @@ html = <<~HTML
       <p>Click the button to call into Ruby.</p>
       <button id="btn">Greet</button>
       <pre id="out"></pre>
+      <p id="status" style="color: gray; font-size: 0.85em;">waiting for ready...</p>
       <script>
         document.getElementById('btn').addEventListener('click', async () => {
           const reply = await window.greet('world');
@@ -31,9 +32,9 @@ html = <<~HTML
 HTML
 
 Hypha.ready {
-  puts "page has rendered"
+  Hypha.eval("document.getElementById('status').textContent = 'Ready — fired from Hypha.ready'")
+  puts "Hypha is ready to use"
 }
-
 
 Hypha.run(title: 'mruby-webview demo', size: [640, 480]) do |w|
 
