@@ -76,15 +76,14 @@ extern "C" const uint8_t hypha_main[];  /* embedded user script, mrbc-compiled *
 /* here via the externs in webview_internal.h.                              */
 /* ========================================================================= */
 
-/* Hypha.ready holds at most one block. Set during the user's setup
- * (before or inside Hypha.run's block), fired exactly once after the
- * setup block returns and before webview::run starts pumping. */
+/* Hypha.ready holds at most one block. Registered during the user's setup
+ * (before or inside Hypha.run's block). Fired from a hidden webview binding
+ * on every DOMContentLoaded — i.e. once the first page is fully rendered.
+ * Cleared when Hypha.run returns so a subsequent call starts fresh. */
 static mrb_value g_ready_hook;
 static bool      g_ready_hook_set = false;
+static bool      g_ready_fired    = false;
 
-/* Sticky once-per-process flag. Set when Hypha.run begins; never cleared.
- * Protects against the macOS NSApplication-singleton hazard and similar. */
-static bool g_hypha_used = false;
 
 /* ========================================================================= */
 /* Error class lookup                                                        */
@@ -195,7 +194,7 @@ static void
 invoke_bound_proc(mrb_state* mrb, mrb_sym name_sym, webview::webview* wv,
     const std::string& id, const std::string& req)
 {
-    int ai = mrb_gc_arena_save(mrb);
+    mrb_int ai = mrb_gc_arena_save(mrb);
 
     mrb_value proc = mrb_hash_fetch(mrb, bindings_hash(mrb),
         mrb_symbol_value(name_sym),
@@ -260,7 +259,7 @@ static void
 invoke_bound_proc_async(mrb_state* mrb, mrb_sym name_sym, webview::webview* wv,
     const std::string& id, const std::string& req)
 {
-    int ai = mrb_gc_arena_save(mrb);
+    mrb_int ai = mrb_gc_arena_save(mrb);
 
     mrb_value proc = mrb_hash_fetch(mrb, async_bindings_hash(mrb),
         mrb_symbol_value(name_sym),
@@ -531,7 +530,7 @@ on_fd_ready(gint /*fd*/, GIOCondition condition, gpointer user_data)
 {
     auto* ud = static_cast<mrb_hypha_fd_ud*>(user_data);
     mrb_state* mrb = ud->mrb;
-    int ai = mrb_gc_arena_save(mrb);
+    mrb_int ai = mrb_gc_arena_save(mrb);
 
     unsigned int conds = 0;
     if (condition & (G_IO_IN | G_IO_HUP))   conds |= HYPHA_FD_READ;
@@ -674,7 +673,7 @@ on_cf_fd_ready(CFFileDescriptorRef cf_fd, CFOptionFlags types, void* info)
 {
     auto* ud = static_cast<mrb_hypha_fd_ud*>(info);
     mrb_state* mrb = ud->mrb;
-    int ai = mrb_gc_arena_save(mrb);
+    mrb_int ai = mrb_gc_arena_save(mrb);
 
     unsigned int conds = 0;
     if (types & kCFFileDescriptorReadCallBack)  conds |= HYPHA_FD_READ;
@@ -865,7 +864,7 @@ hypha_fd_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     int err = WSAGETSELECTERROR(lParam);
     int evt = WSAGETSELECTEVENT(lParam);
 
-    int ai = mrb_gc_arena_save(mrb);
+    mrb_int ai = mrb_gc_arena_save(mrb);
 
     mrb_value smap = sockmap_hash(mrb);
     mrb_value sk_v = mrb_int_value(mrb, sock);
@@ -1190,8 +1189,15 @@ hint_from_kw(mrb_state* mrb, mrb_value v)
     return WEBVIEW_HINT_NONE;
 }
 
-/* Hypha.ready { ... } — register the one-shot hook. Setting a second
- * time raises an error; clearing happens automatically when fired. */
+/* Internal binding name injected by Hypha.run. Mangled to avoid collisions
+ * with user-registered bindings. Must be a macro so it can participate in
+ * compile-time string literal concatenation. */
+#define HYPHA_PAGE_READY_BINDING "__hypha_page_ready_internal__"
+
+/* Hypha.ready { ... } — register a block that fires when the webview page
+ * has fully loaded (DOMContentLoaded). Hypha.run wires it to a hidden
+ * binding + init script so it fires on every page load, not just once.
+ * Registering more than once per run raises. Cleared after each run. */
 static mrb_value
 mrb_hypha_ready(mrb_state* mrb, mrb_value /*self*/)
 {
@@ -1200,12 +1206,11 @@ mrb_hypha_ready(mrb_state* mrb, mrb_value /*self*/)
     if (mrb_undef_p(blk)) {
         mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
     }
-	if (!mrb_proc_p(blk)) {
+    if (!mrb_proc_p(blk)) {
         mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
     if (g_ready_hook_set) {
-        /* don't allow resetting Hypha.ready */
-		mrb_raise(mrb, E_RUNTIME_ERROR, "Hypha.ready hook already set");
+        mrb_raise(mrb, E_RUNTIME_ERROR, "Hypha.ready hook already set");
     }
     mrb_gc_register(mrb, blk);
     g_ready_hook = blk;
@@ -1213,19 +1218,30 @@ mrb_hypha_ready(mrb_state* mrb, mrb_value /*self*/)
     return mrb_nil_value();
 }
 
+/* Clears all per-run state so Hypha.run can be called again cleanly.
+ * Resets the bindings hashes (so bind() re-registers on the new webview),
+ * the ready hook, and the fds watcher hash. */
+static void
+hypha_reset_for_run(mrb_state* mrb)
+{
+    mrb_value hypha_mod = mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(Hypha)));
+    mrb_iv_set(mrb, hypha_mod, MRB_SYM(bindings),        mrb_hash_new(mrb));
+    mrb_iv_set(mrb, hypha_mod, MRB_SYM(async_bindings),  mrb_hash_new(mrb));
+    mrb_iv_set(mrb, hypha_mod, MRB_SYM(fds_procs),       mrb_hash_new(mrb));
+    g_ready_fired = false;
+}
+
 /* Hypha.run(title:, size:, html:, url:, init:) { |hypha| ... }     */
 static mrb_value
 mrb_hypha_run(mrb_state* mrb, mrb_value self)
 {
-    if (g_hypha_used) {
-        mrb_raise(mrb, E_RUNTIME_ERROR,
-            "Hypha.run can only be called once per process");
+    if (g_wv.load(std::memory_order_acquire) != nullptr) {
+        mrb_raise(mrb, E_RUNTIME_ERROR, "Hypha is already running");
     }
     if (!hypha_in_main_state(mrb)) {
         mrb_raise(mrb, E_RUNTIME_ERROR,
             "Hypha.run must be called from the main thread mruby vm");
     }
-    g_hypha_used = true;
 
     /* Parse kwargs. We accept all of these as optional keyword arguments. */
     mrb_value kw_title = mrb_undef_value();
@@ -1282,6 +1298,7 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
     /* Publish g_wv before any helper that might dispatch can run.
      * Release ordering pairs with workers' acquire-loads. */
     g_wv.store(wv, std::memory_order_release);
+    hypha_reset_for_run(mrb);
 
     /* Apply kwargs synchronously (we're on main, no dispatch needed). */
     if (mrb_string_p(kw_title)) {
@@ -1345,28 +1362,56 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
         return mrb_nil_value();   /* unreachable */
     }
 
-    /* Fire the ready hook (if any) before run() begins pumping. */
-    if (g_ready_hook_set) {
-        mrb_bool err = FALSE;
-        mrb_value exc = mrb_protect_error(mrb,
-            [](mrb_state* m, void* p) -> mrb_value {
-                return mrb_yield_argv(m, g_ready_hook, 0, nullptr);
-            },
-            nullptr, &err);
-        mrb_gc_unregister(mrb, g_ready_hook);
+    /* Wire up Hypha.ready to fire on every DOMContentLoaded.
+     *
+     * We inject a hidden init script (runs before the page's own JS) that
+     * listens for DOMContentLoaded and then calls our hidden binding.  The
+     * binding callback runs on the main thread (webview guarantees this) so
+     * it can invoke mruby directly without dispatch.
+     *
+     * We always inject the init script so the hidden binding name is wired;
+     * if no ready hook is registered the binding just returns immediately.
+     * Exceptions inside the hook are stashed and re-raised after wv->run()
+     * returns so the run loop still has a chance to shut down cleanly. */
+    {
+        hypha_check_result(mrb, wv->init(
+            "(function(){"
+            "  document.addEventListener('DOMContentLoaded',function(){"
+            "    if(typeof window['" HYPHA_PAGE_READY_BINDING "'] === 'function'){"
+            "      window['" HYPHA_PAGE_READY_BINDING "']().catch(function(){});"
+            "    }"
+            "  });"
+            "})();"
+        ));
 
-        if (err) {
-            g_wv.store(nullptr, std::memory_order_release);
-            delete wv;
-            if (mrb_obj_is_kind_of(mrb, exc, mrb->eException_class)) {
-                mrb_exc_raise(mrb, exc);
-            }
-            else {
-                mrb_raise(mrb, E_RUNTIME_ERROR,
-                    "Hypha.ready hook raised a non-exception value");
-            }
-            return mrb_nil_value();   /* unreachable */
-        }
+        /* g_pending_ready_exc: stash an exception from inside the bind
+         * callback (can't longjmp out of a webview callback safely). */
+        static mrb_value s_pending_exc;
+        s_pending_exc = mrb_nil_value();
+
+        hypha_check_result(mrb, wv->bind(HYPHA_PAGE_READY_BINDING,
+            [mrb](const std::string& /*seq*/,
+                  const std::string& /*req*/,
+                  void* /*arg*/) {
+                if (!g_ready_hook_set || g_ready_fired) return;
+                g_ready_fired = true;
+                mrb_int ai = mrb_gc_arena_save(mrb);
+                mrb_bool err = FALSE;
+                mrb_value exc = mrb_protect_error(mrb,
+                    [](mrb_state* m, void* p) -> mrb_value {
+                        return mrb_yield_argv(m, g_ready_hook, 0, nullptr);
+                    },
+                    nullptr, &err);
+                mrb_gc_arena_restore(mrb, ai);
+                if (err && mrb_nil_p(s_pending_exc)) {
+                    /* Keep first exception; terminate so run() exits. */
+                    mrb_gc_register(mrb, exc);
+                    s_pending_exc = exc;
+                    webview_terminate(g_wv.load(std::memory_order_acquire));
+                }
+            },
+            nullptr
+        ));
     }
 
 /* Block here until terminate() is called or the window closes.
@@ -1386,13 +1431,12 @@ mrb_hypha_run(mrb_state* mrb, mrb_value self)
             return mrb_nil_value();
         },
         &c, &run_err);
+    webview::webview* g_wv_raw = wv;   /* capture before g_wv is nulled */
 
-    /* Shutdown: clear g_wv (release) before destroying so any in-flight
-     * worker dispatches see null and bail out. webview's destructor
-     * drains the dispatch queue first, so already-queued lambdas still
-     * run on main with g_wv still set — safe. */
+    /* Shutdown: clear g_wv before destroying so any in-flight worker
+     * dispatches see null and bail out cleanly. */
     g_wv.store(nullptr, std::memory_order_release);
-    delete wv;
+    delete g_wv_raw;
 
     if (run_err) {
         if (mrb_obj_is_kind_of(mrb, run_exc, mrb->eException_class)) {
@@ -1634,7 +1678,6 @@ hypha_install_runtime(mrb_state* mrb)
         MRB_ARGS_KEY(5, 0) | MRB_ARGS_BLOCK());
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(ready),
         mrb_hypha_ready, MRB_ARGS_BLOCK());
-
     /* Main-only methods that touch mrb_state-resident state. */
     mrb_define_class_method_id(mrb, hypha, MRB_SYM(bind),
         mrb_hypha_bind,

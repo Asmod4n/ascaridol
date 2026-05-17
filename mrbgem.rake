@@ -19,10 +19,8 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
   spec.add_dependency 'mruby-error',      core: 'mruby-error'
   spec.add_dependency 'mruby-proc-ext',   core: 'mruby-proc-ext'
   spec.add_dependency 'mruby-io',         core: 'mruby-io'
+  spec.add_dependency 'mruby-socket',     core: 'mruby-socket'
 
-  # mruby-fast-json requires UTF-8 string support.
-  spec.cc.defines  << 'MRB_UTF8_STRING'
-  spec.cxx.defines << 'MRB_UTF8_STRING'
 
   # ------------------------------------------------------------------------
   # webview source: shipped as a git submodule under vendor/webview.

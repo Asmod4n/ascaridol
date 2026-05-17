@@ -30,6 +30,11 @@ html = <<~HTML
   </html>
 HTML
 
+Hypha.ready {
+  puts "page has rendered"
+}
+
+
 Hypha.run(title: 'mruby-webview demo', size: [640, 480]) do |w|
 
   w.bind(:greet) do |name|

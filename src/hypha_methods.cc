@@ -421,7 +421,7 @@ mrb_hypha_resolve(mrb_state* mrb, mrb_value /*self*/)
 
     webview::webview* wv = hypha_require_running(mrb);
 
-    int ai = mrb_gc_arena_save(mrb);
+    mrb_int ai = mrb_gc_arena_save(mrb);
 
     /* Run the user block. */
     struct invoke_ctx { mrb_value blk; };
@@ -544,7 +544,7 @@ mrb_hypha_dispatch(mrb_state* mrb, mrb_value /*self*/)
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!m || !w) return;
 
-            int ai = mrb_gc_arena_save(m);
+            mrb_int ai = mrb_gc_arena_save(m);
 
             mrb_value proc = deserialize_proc_from_cbor(m, proc_bytes);
             if (m->exc) {
