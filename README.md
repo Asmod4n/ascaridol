@@ -10,16 +10,13 @@
 
 ## What is this
 
-Hypha is a desktop application framework for [mruby](https://mruby.org). You
-write your app's logic in Ruby, your UI in HTML/CSS/JS, and ship a single
-native binary per platform. The Ruby and the page talk to each other over
-JSON-bridged function calls. The native chrome (window, menus, OS integration)
-is a thin shell built on [webview/webview](https://github.com/webview/webview).
-
-Hypha is small. The runtime is a few thousand lines of C++ wrapping the
-platform's existing browser engine — WebView2 on Windows, WKWebView on macOS,
-WebKitGTK on Linux. There's no embedded Chromium and no cross-platform widget
-toolkit; you don't build your own GTK port of every dialog. Just HTML.
+Hypha is a desktop application framework for [mruby](https://mruby.org).
+You write your app's logic in Ruby, your UI in HTML/CSS/JS, and ship a
+single native binary per platform. Ruby and the page talk over
+JSON-bridged function calls. The native chrome is a thin shell built on
+[webview/webview](https://github.com/webview/webview) — WebView2 on
+Windows, WKWebView on macOS, WebKitGTK on Linux. No embedded Chromium,
+no cross-platform widget toolkit.
 
 ```ruby
 Hypha.run(title: "Hello", size: [800, 600]) do |h|
@@ -35,47 +32,63 @@ That's a complete, working Hypha app.
 
 ## When you'd want this
 
-You're a Ruby developer and you want to ship a desktop app without learning
-JavaScript-as-application-language, Rust, or Go. You want the app to be small,
-load fast, and not bundle 200MB of Chromium. You're OK writing your UI in
-HTML/CSS — same as a web app, except local and with native window chrome.
-
-Common shapes that fit Hypha well: configuration UIs for hardware projects,
-local data viewers, dashboards over local services, dev tools, internal
-utilities, hobby apps. Anything where the alternative would have been
-"build a tiny web server and tell users to open localhost in their browser."
+Ship a small desktop app in Ruby without learning JS-as-application,
+Rust, or Go. Configuration UIs for hardware, local data viewers,
+dashboards, dev tools, internal utilities, hobby apps — anything where
+the alternative would have been "run a tiny web server and tell users
+to open localhost."
 
 ## Status
 
-**v0.1.** Genuinely usable, not yet polished. The threading model is sound,
-the platform code is real, the API has been redesigned twice and is now
-stable enough to commit to. Expect rough edges. Bug reports welcome.
+**v0.2.** Genuinely usable, not yet polished. Threading model is sound,
+platform code is real, API is stable. Bug reports welcome.
 
-Tested on:
-- Windows 11 (WebView2 + Edge)
-- macOS 14+ (WKWebView)
-- Linux (CachyOS/Arch)
+Tested on Windows 11, macOS 14+, Linux (Arch, openSUSE Tumbleweed).
 
 ## Install
 
-Hypha ships as source. You build the `hypha` binary once, then any Hypha
-app is a Ruby script that you compile against that binary.
+Add Hypha to your `build_config.rb` and point `hypha_main` at your app:
+
+```ruby
+conf.gem github: 'Asmod4n/hypha-mrb' do |hypha|
+  hypha.hypha_main = 'app/main.rb'
+end
+```
+
+Then `rake`. The result is `mruby/build/host/bin/hypha` (or `hypha.exe`
+on Windows) with your script embedded. Distribute it as your app.
+
+To try a bundled example without writing a build_config:
 
 ```sh
 git clone https://github.com/Asmod4n/hypha-mrb.git
-cd hypha
-rake
+cd hypha-mrb
+HYPHA_SCRIPT=example/dashboard.rb rake
 ```
 
-This produces `mruby/build/host/bin/hypha` (or `hypha.exe` on Windows). Drop
-it on your `PATH`.
+Relative paths resolve against the gem directory. `HYPHA_SCRIPT`
+overrides `hypha_main` for one-off builds.
+
+### Ruby
+
+mruby's build uses Rake, so you need a Ruby (any recent MRI) at build
+time. It's not embedded in the final binary — just drives the build.
+
+- **Linux:** `pacman -S ruby` / `zypper install ruby` /
+  `apt install ruby` — system Ruby works fine.
+- **macOS:** `brew install ruby` (system Ruby is being phased out).
+- **Windows:** [RubyInstaller](https://rubyinstaller.org). Skip the
+  MSYS2 development kit prompt — Hypha builds against MSVC, you don't
+  need MinGW. Always run `rake` from the **x64 Native Tools Command
+  Prompt for Visual Studio 2022** so `cl.exe` and the Windows SDK are
+  on `PATH`.
 
 ### Platform requirements
 
-**Windows:** WebView2 SDK via NuGet (downloaded automatically as part of the
-build). Visual Studio 2022 or Build Tools, x64 Native Tools Command Prompt.
+**Windows:** Visual Studio 2022 or Build Tools, x64 Native Tools Command
+Prompt. WebView2 SDK is fetched automatically.
 
-**macOS:** Xcode command-line tools. WKWebView is part of macOS.
+**macOS:** Xcode command-line tools.
 
 **Linux:** `pkg-config` and one of:
   - GTK 4 + WebKitGTK 6.0 (Debian 12+, Ubuntu 24.04+)
@@ -87,303 +100,205 @@ build). Visual Studio 2022 or Build Tools, x64 Native Tools Command Prompt.
 ### `Hypha.run(**kwargs) { |h| ... }`
 
 The single entry point. Creates the webview, applies kwargs, yields the
-Hypha module to your block for further setup, then runs until the window
-closes. Blocks the calling thread for the lifetime of the app.
+Hypha module to your block, then runs until the window closes.
 
 ```ruby
 Hypha.run(
-  title: "MyApp",          # window title
-  size:  [900, 720],       # [width, height] or [width, height, hint]
-  debug: false,            # devtools / right-click menu
-  html:  "<h1>...</h1>",   # initial HTML (mutually exclusive with url:)
-  url:   "https://...",    # initial URL
-  init:  "console.log(1)"  # JS to run on every page load
+  title: "MyApp",
+  size:  [900, 720],          # or [w, h, :fixed | :none | :min | :max]
+  html:  "<h1>...</h1>",      # initial HTML (mutually exclusive with url:)
+  url:   "https://...",       # initial URL
+  init:  "console.log(1)"     # JS to run on every page load
 ) do |h|
-  # do anything that requires the webview to be live:
   h.bind(:foo) { ... }
-  h.poll_add($stdin, watch = :r) { |io, evt| ... }
   h.html = render_initial_page
 end
 ```
 
-`Hypha.run` can only be called once per process. `size: [w, h, :fixed]`
-locks the window to that size; other valid hints are `:none`, `:min`, `:max`.
+`Hypha.run` is not re-entrant — you can't call it from inside its own
+setup block or from a bind callback — but you can call it again after
+it returns. Each call creates a fresh window and runs until that
+window closes.
 
 ### Setting content
 
 ```ruby
-Hypha.html  = "<h1>...</h1>"   # set or replace page HTML
-Hypha.url   = "https://..."     # navigate to a URL
+Hypha.html  = "<h1>...</h1>"
+Hypha.url   = "https://..."
 Hypha.title = "New title"
-Hypha.size  = [800, 600]        # also accepts [w, h, :hint]
-Hypha.init "console.log('runs on every page load')"
-Hypha.eval "document.body.style.background = 'red'"
+Hypha.size  = [800, 600]
+Hypha.init  "console.log('runs on every page load')"
+Hypha.eval  "document.body.style.background = 'red'"
 ```
 
-All of these work from the setup block, from inside bind callbacks, and
-from worker threads (where they dispatch onto main automatically).
+All of these work from the setup block, from bind callbacks, and from
+worker threads (where they dispatch onto main automatically).
 
 ### `Hypha.bind(name, &blk)`
 
-Register a Ruby block that JavaScript can call. The JS side gets a Promise.
+Register a Ruby block JavaScript can call. JS gets a Promise.
 
 ```ruby
 Hypha.bind(:fetch_user) do |user_id|
   user = lookup_user(user_id)
-  { name: user.name, email: user.email }   # auto-JSON-serialized
+  { name: user.name, email: user.email }
 end
 ```
 
 ```javascript
-fetch_user(42).then(user => {
-  console.log(user.name);
-});
+fetch_user(42).then(user => console.log(user.name));
 ```
 
-Bind callbacks run on the main thread. Multiple bindings can be registered;
-re-binding the same name replaces the previous block. Exceptions raised in
-Ruby become rejected promises with a real `Error` object on the JS side
-(name, message, and Ruby backtrace preserved).
+Bind callbacks run on main. Re-binding the same name replaces the
+previous block. Exceptions raised in Ruby become rejected promises with
+a real `Error` object on the JS side (name, message, and Ruby backtrace
+preserved).
 
-`Hypha.bind` is main-thread-only — register all your bindings in the setup
-block. Workers should send work to existing bindings via `Hypha.dispatch`,
-not register new ones.
+Main-thread-only. Register all bindings in the setup block.
 
-  ### `Hypha.bind_async(name, &blk)`
+### `Hypha.bind_async(name, &blk)`
 
-  Like `Hypha.bind`, but the answer is deferred. The block receives an `id`
-  plus any JS-side args and is expected to call `Hypha.resolve(id) { ... }`
-  at some later point — possibly much later, possibly from another thread.
-  Use this whenever the answer isn't sitting in memory at the moment of the
-  call: waiting on I/O, on a timer, on user interaction, on a worker.
+Like `bind`, but the answer is deferred. The block gets an `id` plus
+any JS args and is expected to call `Hypha.resolve(id) { ... }` later —
+possibly much later, possibly from another thread. Use this for I/O,
+timers, user interaction, worker results.
 
 ```ruby
-  Hypha.bind_async(:wait_for_ping) do |id, *args|
-    @pending = id    # stash the id, resolve later
-  end
+Hypha.bind_async(:wait_for_ping) do |id, *args|
+  @pending = id
+end
 ```
 
-```javascript
-  wait_for_ping().then(v => console.log(v));
-```
+The block's return value is ignored — resolution happens through
+`Hypha.resolve`, not return. If the block raises before stashing the
+id anywhere, the promise auto-rejects so JS doesn't hang. Drop the id
+without resolving and the promise leaks forever.
 
-  The block's return value is ignored — resolution happens through
-  `Hypha.resolve`, not through returning. If the block raises before
-  stashing the id, the promise auto-rejects with `{name, message, backtrace}`
-  so JS doesn't hang. Drop the id without resolving and the promise leaks
-  forever — that's on you.
+Sync and async names share a single JS-side namespace but live in
+separate Ruby registries; `Hypha.unbind(name)` clears whichever.
 
-  `Hypha.bind_async` is main-thread-only. Re-binding the same name replaces
-  the previous block. Sync (`bind`) and async (`bind_async`) names share a
-  single namespace on the JS side but live in separate Ruby-side registries;
-  `Hypha.unbind(name)` clears whichever one is registered.
+See [`example/bind_async.rb`](example/bind_async.rb).
 
-  ### `Hypha.resolve(id, &blk)`
+### `Hypha.resolve(id, &blk)`
 
-  Settle a pending `bind_async` call. The block's return value is
-  JSON-encoded and shipped to JS; if it raises, the promise rejects with
-  `{name, message, backtrace}`. Thread-safe — hops onto the main run loop
-  internally, so you can call it from anywhere without `Hypha.dispatch`.
-
-  A minimal end-to-end example, no I/O, no threads:
-
-```ruby
-  Hypha.run(title: "resolve demo", size: [400, 200]) do |h|
-    @pending = []
-    @counter = 0
-  
-    # JS calls wait_for_ping() and gets a promise that hangs until
-    # someone calls ping_now(). Multiple waiters queue up FIFO.
-    h.bind_async(:wait_for_ping) do |id|
-      @counter += 1
-      @pending << [id, @counter]
-    end
-  
-    h.bind(:ping_now) do
-      if (slot = @pending.shift)
-        id, n = slot
-        h.resolve(id) { "pong ##{n} at #{Time.now.to_f}" }
-        "delivered"
-      else
-        "no one waiting"
-      end
-    end
-  
-    h.html = <<~'HTML'
-      <!doctype html>
-      <button onclick="wait_for_ping().then(v => log.textContent += v + '\n')">wait</button>
-      <button onclick="ping_now()">ping</button>
-      <pre id="log"></pre>
-    HTML
-  end
-```
-
-  Click **wait** first — the promise is pending, `id` is sitting in
-  `pending`. Click **ping** — `Hypha.resolve` fires the stashed id and the
-  `<pre>` updates.
-
-  The shape: `bind_async`'s job is to capture the id and return.
-  `Hypha.resolve(id) { ... }` is what actually settles the promise. Because
-  `resolve` is thread-safe, the resolver doesn't have to be another bind —
-  it can be `poll_add`, an actor callback, a worker thread in a C
-  extension, whatever. The id is just a token; whoever holds it owns the
-  promise.
-
-  For a richer worked example (stdin lines delivered as JS promises, with
-  EOF handling and a buffer/waiter queue), see
-  [`example/bind_async.rb`](example/bind_async.rb).
+Settle a pending `bind_async` call. Block return is JSON-encoded and
+shipped to JS; if it raises, the promise rejects with the exception.
+Thread-safe — call it from anywhere.
 
 ### `Hypha.poll_add(io, readiness = :r, &blk)`
 
-Watch a file descriptor on the main run
-loop. The block fires when the fd becomes ready in the requested
-direction. Returns a `Hypha::Watcher` (see below).
+Watch a file descriptor on the main run loop. Returns a
+`Hypha::Watcher`.
 
 ```ruby
 watcher = Hypha.poll_add($stdin) do |io, cond|
   line = io.gets
   Hypha.eval("console.log(#{JSON.dump(line)})")
-  true   # return falsy to stop watching
+  true   # falsy stops watching
 end
 ```
 
-**Readiness** — the optional second argument tells Hypha which direction(s)
-of readiness to watch for. Defaults to `:r`.
+Readiness: `:r` (readable), `:w` (writable), `:rw` (both). Block gets
+`(io, cond)` where `cond` is the Symbol describing the wakeup
+(`:r`, `:w`, `:rw`, or `:err`).
 
-| Argument | Watches               |
-|----------|-----------------------|
-| `:r`     | readable              |
-| `:w`     | writable              |
-| `:rw`    | readable and writable |
+**Windows:** the fd must be a winsock `SOCKET`; `WSAAsyncSelect`
+side-effects the socket into non-blocking and locks out further
+`ioctlsocket(FIONBIO)` changes.
 
-Use `:r` when you only consume from the fd, `:w` when you only produce,
-`:rw` when one callback handles both. To switch a live watcher between
-modes (e.g. only ask for `:w` wakeups when your outbox has bytes), use
-`Watcher#update` — see below.
+**Linux / macOS:** the fd's blocking flag is untouched. Call
+`io._setnonblock(true)` first or a `recv` after a spurious wakeup will
+stall the run loop.
 
-**Block arguments** — `(io, cond)` where `cond` is a Symbol describing what
-just happened on this wakeup:
-
-| `cond`  | Meaning                                                          |
-|---------|------------------------------------------------------------------|
-| `:r`    | readable (peer close surfaces here too — `recv` will return EOF) |
-| `:w`    | writable                                                         |
-| `:rw`   | both directions ready in the same wakeup                         |
-| `:err`  | underlying watcher reported an error; tear down                  |
-
-You only ever see `cond` values consistent with what you registered:
-
-| Registered | Possible `cond`             |
-|------------|-----------------------------|
-| `:r`       | `:r`, `:err`                |
-| `:w`       | `:w`, `:err`                |
-| `:rw`      | `:r`, `:w`, `:rw`, `:err`   |
-
-The block's return value controls watcher lifetime: truthy keeps watching,
-falsy unwatches and drops the fd.
-
-**Cross-platform** — GTK uses `g_unix_fd_add`, macOS uses
-`CFFileDescriptor` + `CFRunLoopSource`, Windows uses `WSAAsyncSelect` on a
-hidden message-only `HWND`. The block sees the same `cond` Symbol on every
-platform; you don't need to write per-OS branches.
-
-A few platform quirks worth knowing:
-
-- **Windows**: the fd must be a winsock `SOCKET`, not a regular Win32
-  `HANDLE`. `WSAAsyncSelect` also flips the socket to non-blocking as a
-  side effect, and locks out further `ioctlsocket(FIONBIO, ...)` changes —
-  so don't try to put it back into blocking mode while the watcher is
-  attached.
-- **Linux / macOS**: the fd's blocking flag is not touched. If you want
-  non-blocking I/O (you probably do — otherwise a `recv` after a spurious
-  wakeup will stall the run loop), call `io._setnonblock(true)` before
-  `poll_add`. Accepted client sockets inherit the listener's flag, so
-  setting it once on the listener is enough.
-
-Main-thread-only — calling from a worker raises. Native event watchers
-need a closure over your application state (sockets, buffers, your own
-callbacks), and `Hypha.dispatch` serializes procs by value, which would
-strip that closure. Register watchers from main directly, typically in
-the `Hypha.run` block or a `Hypha.bind` callback.
-
-See [`example/echo_server.rb`](example/echo_server.rb) for a complete TCP
-echo server that uses `Watcher#update` to toggle `:r` ↔ `:rw` as its
-outbox fills and drains.
+Main-thread-only. See [`example/echo_server.rb`](example/echo_server.rb).
 
 ### `Hypha::Watcher`
 
-`Hypha.poll_add` returns a handle representing the live subscription.
+| Method                        | What it does                              |
+|-------------------------------|-------------------------------------------|
+| `#io`                         | the IO/socket the watcher is attached to  |
+| `#update(:r \| :w \| :rw)`    | change readiness in place                 |
+| `#remove`                     | stop watching                             |
 
-| Method                        | What it does                                  |
-|-------------------------------|-----------------------------------------------|
-| `#io`                         | the IO/socket the watcher is attached to     |
-| `#update(:r \| :w \| :rw)`    | change readiness in place                     |
-| `#remove`                     | stop watching; same as `Hypha.poll_remove`    |
-
-```ruby
-watcher = Hypha.poll_add(sock, :r) { |s, cond| ... }
-watcher.update(:rw)   # also wake me on writable
-watcher.remove        # stop watching
-```
-
-`#update` is the canonical way to manage write-readiness notifications:
-subscribe to `:r` only, switch to `:rw` when your outbox grows, switch
-back to `:r` when it drains. All three backends handle this cheaply
-(`WSAAsyncSelect` and `CFFileDescriptorEnableCallBacks` mutate in place;
-GLib drops the old source and adds a new one), so don't be shy about
-calling it.
-
-After `#remove` — or after the block returns falsy and the watcher is
-torn down by the loop — the watcher is dead. The next `#update` or
-`#remove` call raises `IOError`. `#io` keeps working (useful for log
-lines after teardown).
-
-### `Hypha.poll_remove(io)`
-
-Stop watching a fd previously passed
-to `poll_add`. No-op if not being watched. Equivalent to `watcher.remove`
-if you've held onto the Watcher handle.
+Use `#update` to toggle write-readiness: subscribe to `:r`, switch to
+`:rw` when your outbox grows, back to `:r` when it drains. After
+`#remove` (or after the block returns falsy), the watcher is dead;
+`#update` and `#remove` raise `IOError`.
 
 ### `Hypha.dispatch(*args, &blk)`
 
-The cross-thread escape hatch. mruby itself has no threads, but if you've
-got a C extension that creates threads, those threads can push work back to
-main via `Hypha.dispatch`:
+The cross-thread escape hatch. mruby itself has no threads, but C
+extensions can create them. Those threads push work back to main via
+`Hypha.dispatch`:
 
 ```ruby
-worker_thread = SomeThreadingGem.spawn do
-  data = expensive_computation
-  Hypha.dispatch(data) { |d| Hypha.html = render(d) }
-end
-```
-
-The dispatched proc must be self-contained. References to outer-scope
-variables won't work — the proc is serialized via mruby-cbor (with Procs
-encoded as their irep dumps via `Proc#to_irep`) and reconstructed in main's
-mrb_state. Pass data via positional arguments, not closures:
-
-```ruby
-# WRONG — captures `result` from the worker's scope
-result = compute()
-Hypha.dispatch { Hypha.html = render(result) }   # NoMethodError on main
-
-# RIGHT — data flows in via args
-result = compute()
 Hypha.dispatch(result) { |r| Hypha.html = render(r) }
 ```
 
+The proc is serialized (its irep is dumped via `Proc#to_irep` and
+shipped as CBOR bytes) and reconstructed inside main's `mrb_state`.
+Same goes for `Hypha.resolve`'s block, and for any other Hypha entry
+point that's documented as thread-safe.
+
+**What survives serialization:**
+
+- The proc's own bytecode and literals.
+- Arguments passed alongside the proc, as long as each argument is
+  itself CBOR-encodable. Strings, integers, floats, true/false/nil,
+  symbols, arrays and hashes of the above, and other Procs all work.
+  Custom classes work only if you've registered a CBOR tag for them.
+
+**What does not survive:**
+
+- Captured outer-scope locals. `result = 42; dispatch { result }` looks
+  like it should work but raises on main — the local `result` doesn't
+  exist there.
+- Captured `self` and any instance variables that came with it.
+- Anything heap-allocated on the worker's VM (file handles, sockets,
+  C-extension wrappers): the references are meaningless on main.
+
+**Rule of thumb:** write the proc as if it's being eval'd at the top
+level on a fresh VM. Everything the proc needs comes in through its
+arguments:
+
+```ruby
+# WRONG — closes over `data` from worker's scope
+data = fetch_something
+Hypha.dispatch { Hypha.html = render(data) }
+
+# RIGHT — `data` flows in as an arg
+data = fetch_something
+Hypha.dispatch(data) { |d| Hypha.html = render(d) }
+```
+
+If the proc raises on main, the exception is printed via
+`mrb_print_error` (stderr by default). The dispatching worker is
+already gone; nothing propagates back.
+
+### Smaller methods
+
+| Method                       | What it does                                                  |
+|------------------------------|---------------------------------------------------------------|
+| `Hypha.ready { ... }`        | One-shot hook fired once after setup, before the run loop pumps. Raises on second set. |
+| `Hypha.unbind(name)`         | Remove a sync or async binding. Main only.                    |
+| `Hypha.bindings`             | Array of registered binding names (Symbols). Main only.       |
+| `Hypha.terminate`            | Close the window and exit the run loop.                       |
+| `Hypha.running?`             | True between `Hypha.run` starting and the run loop exiting.   |
+| `Hypha.version`              | Hash with libwebview version info (`:version`, `:major`, `:minor`, `:patch`, `:pre_release`, `:build_metadata`). |
+| `Hypha.platform`             | Platform identifier Symbol.                                   |
+| `Hypha.handle(kind=:window)` | Native handle by kind — `:window`, `:widget`, or `:browser_controller`. Main only. |
+
 ## The `rb-*` router
 
-For form-driven UIs, Hypha provides an htmx-style attribute router. Drop the
-generated `<script>` into your `<head>`:
+htmx-style attribute router for form-driven UIs. Drop the generated
+`<script>` into `<head>`:
 
 ```ruby
 Hypha.run do |h|
   h.bind(:route) do |method, path, params|
     case "#{method} #{path}"
-    when "GET /users" then render_user_list
+    when "GET /users"  then render_user_list
     when "POST /users" then create_user(params); render_user_list
-    # ...
     end
   end
 
@@ -397,112 +312,59 @@ Hypha.run do |h|
 end
 ```
 
-Supported attributes:
-- `rb-get`, `rb-post`, `rb-put`, `rb-patch`, `rb-delete` — verb + path, fires `route`
-- `rb-target` — CSS selector for where the response HTML goes
-- `rb-swap` — `innerHTML` (default) or `outerHTML`
-- `rb-trigger` — `"input changed delay:200ms, click"` style trigger spec
-- `rb-vals` — JSON object merged into params
-- `rb-indicator` — CSS selector for an element to mark `.busy` during requests
+Attributes: `rb-get`/`rb-post`/`rb-put`/`rb-patch`/`rb-delete` (verb +
+path), `rb-target` (CSS selector), `rb-swap` (`innerHTML` /
+`outerHTML`), `rb-trigger` (`"input changed delay:200ms, click"`),
+`rb-vals` (JSON merged into params), `rb-indicator` (CSS selector
+marked `.busy` during requests).
 
-Forms harvest their named fields automatically. Lone form-controls (input,
-select, textarea) contribute their name/value. `rb-vals` overrides both.
+Forms harvest named fields automatically. Lone controls contribute
+their name/value. `rb-vals` overrides both.
 
 ## Threading model
 
-mruby is single-threaded. Hypha's design assumes that, and provides one
-escape hatch (`Hypha.dispatch`) for users who bring their own threads via
-C extensions.
+mruby is single-threaded. Only the main thread ever touches Hypha's
+`mrb_state`.
 
-The architectural rule: **only the main thread ever touches the `mrb_state` of Hypha.**
-Hypha methods called from worker threads either dispatch a lambda onto main
-(for value-only operations: `title=`, `html=`, `eval`, etc.) or raise
-(for operations that need the main `mrb_state`: `bind`, `poll_add`).
+Hypha methods called from worker threads either dispatch onto main
+(value-only ops: `title=`, `html=`, `eval`) or raise (ops that need the
+main `mrb_state`: `bind`, `poll_add`).
 
-Procs cross thread boundaries via cbor: the proc's irep is dumped, sent as
-bytes, and reconstructed on main. The proc must be self-contained — it can
-take arguments but can't reference anything from the worker's scope. Captured
-variables raise Errors at first invocation on main.
+For the details of how procs and arguments cross the boundary, see
+[`Hypha.dispatch`](#hyphadispatchargs-blk) above.
 
 ## Distribution and signing
 
-Hypha ships unsigned by default. The first launch on Windows triggers
-SmartScreen ("Windows protected your PC" → "More info" → "Run anyway"); on
-macOS, Gatekeeper prompts ("unidentified developer" → right-click → Open).
-After that one click, the binary runs normally.
+Hypha ships unsigned by default. First launch on Windows triggers
+SmartScreen, on macOS triggers Gatekeeper. After one click, the binary
+runs normally.
 
-For a smoother experience, you have a few options:
+For a smoother experience:
 
-**Windows: SignPath Foundation.** [SignPath](https://signpath.org) provides
-free OV-equivalent code signing for qualifying open-source projects, endorsed
-by Microsoft. Apply, integrate their GitHub Action into your release workflow,
-get signed releases automatically. SmartScreen reputation accumulates over
-time. Most established OSS Windows tools sign through SignPath.
-
-**Windows: Microsoft Trusted Signing.** $9.99/month, no certificate to manage,
-integrates with CI. Cheapest legitimate option if SignPath doesn't fit.
-
-**macOS: Apple Developer Program.** $99/year for notarization. No free
-equivalent for OSS exists. Alternative: distribute via Homebrew tap (Homebrew
-strips quarantine, no Gatekeeper warnings), or accept the right-click→Open
-dance and document it.
-
-**Linux:** No signing infrastructure. Just ship the binary.
-
-For the Hypha project itself, signing is out of scope for v0.1. The README's
-"first launch is annoying, every launch after is fine" UX is acceptable for
-the technical audience Hypha is aimed at.
-
-## Building apps with Hypha
-
-Hypha apps are Ruby scripts compiled into the `hypha` binary at build time.
-The Rakefile handles the embed-and-build cycle for you:
-
-```sh
-rake compile                              # builds with example/hello.rb
-rake compile[example/dashboard.rb]        # builds with your script
-rake 'compile[path/to/myapp.rb]'          # quote the brackets in zsh / fish
-```
-
-Or set the script via env var:
-
-```sh
-HYPHA_SCRIPT=example/dashboard.rb rake compile
-```
-
-The result is `mruby/build/host/bin/hypha` (or `hypha.exe` on Windows) with
-your script embedded. Distribute that binary as your app.
-
-If you want to embed a script without rebuilding the binary (e.g. while
-iterating), `rake embed[your_script.rb]` regenerates `tools/hypha/main.c`
-from the script. The next `rake compile` picks it up.
-
-A more polished `hypha bundle` workflow (where users build their app from
-the command line without touching the gem source) is planned for v0.2. For
-v0.1, the build is manual but transparent.
+- **Windows:** [SignPath Foundation](https://signpath.org) offers free
+  code signing for qualifying OSS. Microsoft Trusted Signing at
+  $9.99/month is the cheapest paid option.
+- **macOS:** Apple Developer Program ($99/yr) for notarization, or
+  distribute via a Homebrew tap.
+- **Linux:** no signing infrastructure; just ship the binary.
 
 ## Project structure
 
-If you're contributing or extending Hypha:
-
 ```
-mruby-webview/
-├── src/
-│   ├── webview_internal.h     # globals declared, helpers inlined
-│   └── hypha_methods.cpp      # Hypha.* methods that don't need platform code
-│                              # (title=, html=, eval, dispatch, etc.)
-├── mrblib/
-│   └── hypha.rb               # CBOR Proc tag, html_router, bind wrapper
-├── tools/
-│   └── hypha/
-│       └── hypha.cpp          # main(), Hypha.run, Hypha.bind, platform code
-└── mrbgem.rake                # build configuration
+hypha-mrb/
+├── src/                       # linked into libmruby
+├── mrblib/hypha.rb            # Ruby-level helpers
+├── tools/hypha/
+│   ├── hypha.cc               # main(), platform code
+│   ├── stub.rb                # default "no app embedded" script
+│   └── main.c                 # generated by mrbc at build time
+└── mrbgem.rake
 ```
 
-The split between `src/` and `tools/hypha/` is meaningful: `src/` lives in
-`libmruby.lib` and is linkable by other binaries (which see Hypha methods
-that all raise "Hypha is not running" until you start Hypha with Hypha.run); `tools/hypha/` only links into the
-`hypha` binary and provides the actual runtime.
+`tools/hypha/main.c` is regenerated on every build from whatever script
+`hypha_main` points at. It's tracked in git so a fresh clone can build;
+don't commit local changes to it (`git checkout tools/hypha/main.c` to
+discard).
 
 ## License
 
@@ -510,6 +372,4 @@ MIT. See LICENSE.
 
 ## Acknowledgments
 
-Built on [webview/webview](https://github.com/webview/webview), which does
-the actual work of wrapping per-platform browser engines. Hypha is a thin
-mruby integration on top.
+Built on [webview/webview](https://github.com/webview/webview).

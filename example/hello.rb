@@ -33,7 +33,7 @@ HTML
 
 Hypha.ready {
   Hypha.eval("document.getElementById('status').textContent = 'Ready — fired from Hypha.ready'")
-  puts "Hypha is 1 ready to use"
+  puts "Hypha is ready to use"
 }
 
 Hypha.run(title: 'mruby-webview demo', size: [640, 480]) do |w|

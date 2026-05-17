@@ -109,6 +109,17 @@ struct HyphaWVOwner {
 
 MRB_CPP_DEFINE_TYPE(HyphaWVOwner, HyphaWVOwner)
 
+static void
+hypha_require_main_state(mrb_state* mrb, const char* method_name)
+{
+    if (!hypha_in_main_state(mrb)) {
+        mrb_raisef(mrb, E_RUNTIME_ERROR,
+            "%s can only be called from the main thread mruby vm; "
+            "use Hypha.dispatch to run code on main from a worker",
+            method_name);
+    }
+}
+
 
 /* ========================================================================= */
 /* Bind machinery                                                            */
@@ -1210,6 +1221,7 @@ hint_from_kw(mrb_state* mrb, mrb_value v)
 static mrb_value
 mrb_hypha_ready(mrb_state* mrb, mrb_value /*self*/)
 {
+    hypha_require_main_state(mrb, "Hypha.ready");
     mrb_value blk = mrb_undef_value();
     mrb_get_args(mrb, "&", &blk);
     if (mrb_undef_p(blk)) {
@@ -1453,16 +1465,6 @@ hypha_require_running_local(mrb_state* mrb)
     return wv;
 }
 
-static void
-hypha_require_main_state(mrb_state* mrb, const char* method_name)
-{
-    if (!hypha_in_main_state(mrb)) {
-        mrb_raisef(mrb, E_RUNTIME_ERROR,
-            "%s can only be called from the main thread mruby vm; "
-            "use Hypha.dispatch to run code on main from a worker",
-            method_name);
-    }
-}
 
 /* Hypha.bind(name, &blk) -- main only. */
 static mrb_value
