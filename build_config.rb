@@ -7,6 +7,6 @@ MRuby::Build.new do |conf|
   conf.enable_test
   conf.enable_debug
   conf.gem(File.expand_path(File.dirname(__FILE__))) do |hypha|
-    hypha.hypha_main = "../example/hello.rb"
+    hypha.hypha_main = "../example/notes.rb"
   end
 end

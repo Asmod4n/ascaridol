@@ -1,7 +1,16 @@
-# Minimal "hello world" example for mruby-webview.
+# Minimal "hello world" example for Hypha.
 #
-# Build mruby with this gem enabled, then run:
-#   ./bin/mruby example/hello.rb
+# Build:
+#   conf.gem '<path-to-hypha-mrb>' do |hypha|
+#     hypha.hypha_main = 'example/hello.rb'
+#   end
+#   rake
+#
+# Run:
+#   mruby/build/host/bin/hypha
+#
+# Shows: window creation, html=, bind, calling Ruby from JS,
+# and Hypha.ready firing once before the run loop starts pumping.
 
 html = <<~HTML
   <!doctype html>
