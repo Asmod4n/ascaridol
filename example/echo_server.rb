@@ -5,7 +5,7 @@
 #
 # Build:
 #   conf.gem '<path-to-ascaridol-mrb>' do |ascaridol|
-#     ascaridol.ascaridol_main = File.expand_path('example/echo_server.rb', __dir__)
+#     ascaridol.rbfiles << '../example/echo_server.rb'
 #   end
 #   rake
 #

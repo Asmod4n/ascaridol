@@ -2,7 +2,7 @@
 #
 # Build:
 #   conf.gem '<path-to-ascaridol-mrb>' do |ascaridol|
-#     ascaridol.ascaridol_main = 'example/hello.rb'
+#     ascaridol.rbfiles << '../example/hello.rb'
 #   end
 #   rake
 #
@@ -40,12 +40,12 @@ html = <<~HTML
   </html>
 HTML
 
-Ascaridol.ready {
-  Ascaridol.eval("document.getElementById('status').textContent = 'Ready — fired from Ascaridol.ready'")
-  puts "Ascaridol is ready to use"
-}
-
 def main
+  Ascaridol.ready {
+    Ascaridol.eval("document.getElementById('status').textContent = 'Ready — fired from Ascaridol.ready'")
+    puts "Ascaridol is ready to use"
+  }
+
   Ascaridol.run(title: 'mruby-webview demo', size: [640, 480]) do |w|
 
     w.bind(:greet) do |name|

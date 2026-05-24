@@ -6,7 +6,8 @@ MRuby::Build.new do |conf|
   conf.cxx.defines << 'MRB_UTF8_STRING' << 'MRB_HIGH_PROFILE'
   conf.enable_test
   conf.enable_debug
+  conf.gem core: 'mruby-bin-mirb'
   conf.gem(File.expand_path(File.dirname(__FILE__))) do |ascaridol|
-    ascaridol.rbfiles << "../example/menu.rb"
+    ascaridol.rbfiles << "../example/hn_live.rb"
   end
 end
