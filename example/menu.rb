@@ -31,9 +31,15 @@ def main
           <meta charset="utf-8">
           <title>HTML menu demo</title>
           <style>
+            /* `only light` forces light scheme even when the OS / WebView2
+               is in dark mode — without this WebView2 inverts default
+               text/background to dark and our unstyled body is unreadable. */
+            :root { color-scheme: only light; }
+            html, body { background: #fff; color: #111; }
             body { font: 16px/1.4 system-ui, sans-serif; margin: 2em; }
             kbd { background: #eee; border: 1px solid #ccc; border-radius: 3px;
-                  padding: 0 4px; font-family: monospace; }
+                  padding: 0 4px; font-family: monospace; color: #111; }
+            code { color: #111; }
           </style>
         </head>
         <body>

@@ -1167,6 +1167,9 @@ parse_win32_accel(const char* s)
 /* Minimal COM impl. webview2 AddRefs on add_AcceleratorKeyPressed and
  * Releases when the controller is torn down; we Release our initial ref
  * after handoff and let the runtime own lifetime. */
+/* ASCARIDOL_WIN32_ACCEL_FIXUP_V1 */
+static std::vector<AscaridolWin32MenuItem> g_win32_menu_items;
+
 class AscaridolKeyHandler : public ICoreWebView2AcceleratorKeyPressedEventHandler {
     LONG m_refs = 1;
 public:
@@ -1228,7 +1231,6 @@ public:
 static bool g_win32_accel_handler_installed = false;
 
 
-static std::vector<AscaridolWin32MenuItem> g_win32_menu_items;
 static bool g_win32_menu_subclass_installed = false;
 static const UINT MRB_ASCARIDOL_MENU_ID_BASE = 0xA000;
 
