@@ -1,22 +1,23 @@
-# TCP echo server demonstrating Hypha.poll_add and Watcher#update.
+# TCP echo server demonstrating Ascaridol.poll_add and Watcher#update.
 # The watcher toggles between :r (read only) and :rw (read + write)
 # based on outbox state, so we only get write-ready wakeups when there
 # are actually bytes queued to send.
 #
 # Build:
-#   conf.gem '<path-to-hypha-mrb>' do |hypha|
-#     hypha.hypha_main = File.expand_path('example/echo_server.rb', __dir__)
+#   conf.gem '<path-to-ascaridol-mrb>' do |ascaridol|
+#     ascaridol.ascaridol_main = File.expand_path('example/echo_server.rb', __dir__)
 #   end
 #   rake
 #
 # Run:
-#   mruby/build/host/bin/hypha
+#   mruby/build/host/bin/ascaridol
 #   nc 127.0.0.1 5000             # in another terminal
 #
 # (On Windows, ncat from nmap works; PowerShell has no built-in nc.)
+def main
 
-Hypha.run(title: "Echo Server", size: [460, 400]) do
-  Hypha.html = <<~HTML
+Ascaridol.run(title: "Echo Server", size: [460, 400]) do
+  Ascaridol.html = <<~HTML
     <!doctype html>
     <meta charset="utf-8">
     <meta name="color-scheme" content="light">
@@ -53,11 +54,11 @@ Hypha.run(title: "Echo Server", size: [460, 400]) do
   HTML
 
   log = ->(line) {
-    Hypha.eval(%(document.getElementById('log').textContent += #{line.dump} + "\\n";
+    Ascaridol.eval(%(document.getElementById('log').textContent += #{line.dump} + "\\n";
                  var el = document.getElementById('log'); el.scrollTop = el.scrollHeight;))
   }
 
-  Hypha.ready {
+  Ascaridol.ready {
       puts "Echo server running"
   }
 
@@ -65,7 +66,7 @@ Hypha.run(title: "Echo Server", size: [460, 400]) do
   server._setnonblock(true)        # accepted clients inherit this flag
 
   # Listener: only ever readable (incoming connections), so :r is enough.
-  Hypha.poll_add(server, :r) do |srv, _cond|
+  Ascaridol.poll_add(server, :r) do |srv, _cond|
     client = srv.accept
     outbox = String.new
     wants_write = false
@@ -75,7 +76,7 @@ Hypha.run(title: "Echo Server", size: [460, 400]) do
     # can toggle :r <-> :rw. The closure captures `watcher` by name, so
     # the assignment below resolves correctly by the time the block runs.
     watcher = nil
-    watcher = Hypha.poll_add(client, :r) do |sock, cond|
+    watcher = Ascaridol.poll_add(client, :r) do |sock, cond|
       alive = true
 
       # Read side -- :r and :rw both signal readable.
@@ -132,4 +133,5 @@ Hypha.run(title: "Echo Server", size: [460, 400]) do
 
     true
   end
+end
 end

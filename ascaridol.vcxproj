@@ -119,7 +119,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\hypha_methods.cc" />
+    <ClCompile Include="src\ascaridol_methods.cc" />
     <ClCompile Include="vendor\webview\core\src\webview.cc" />
     <ClCompile Include="vendor\webview\core\tests\src\functional_tests.cc" />
     <ClCompile Include="vendor\webview\core\tests\src\unit_tests.cc" />

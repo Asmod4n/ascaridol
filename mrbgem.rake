@@ -1,10 +1,6 @@
 require 'rake'
 
-MRuby::Gem::Specification.new('hypha-mrb') do |spec|
-  class << spec
-    attr_accessor :hypha_main
-  end
-
+MRuby::Gem::Specification.new('ascaridol') do |spec|
   spec.license = 'MIT'
   spec.author  = 'Hendrik Beskow'
   spec.summary = 'A small Framework to build native desktop apps in mruby'
@@ -28,24 +24,10 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
   spec.add_dependency 'mruby-socket',     core: 'mruby-socket'
   spec.add_dependency 'mruby-bin-mrbc',   core: 'mruby-bin-mrbc'
 
-  gem_root  = File.dirname(__FILE__)
-  main_c    = File.expand_path('tools/hypha/main_bytecode.h', gem_root)
-  stub_rb   = File.expand_path('tools/hypha/stub.rb', gem_root)
-
-  ft = Rake::FileTask.define_task(main_c => build.mrbcfile) do
-    script_abs = ENV['HYPHA_SCRIPT'] || spec.hypha_main || stub_rb
-    abort "[hypha] script not found: #{script_abs}" unless File.exist?(script_abs)
-
-    puts "[hypha] embedding #{script_abs}"
-    sh build.mrbcfile, '-g', '-Bhypha_main', '-o', main_c, script_abs
-  end
-  def ft.needed?; true; end
-
-
   # ------------------------------------------------------------------------
   # webview source: shipped as a git submodule under vendor/webview.
   # ------------------------------------------------------------------------
-  webview_dir = ENV['HYPHA_WEBVIEW_DIR'] || File.join(spec.dir, 'vendor', 'webview')
+  webview_dir = ENV['ASCARIDOL_WEBVIEW_DIR'] || File.join(spec.dir, 'vendor', 'webview')
   webview_inc = File.join(webview_dir, 'core', 'include')
 
   unless File.directory?(webview_inc)
@@ -58,9 +40,9 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
 
   unless File.directory?(webview_inc)
     abort <<~MSG
-      [hypha-mrb] webview source not found at #{webview_dir}.
+      [ascaridol] webview source not found at #{webview_dir}.
       Run `git submodule update --init --recursive` in the gem directory,
-      or set HYPHA_WEBVIEW_DIR to point at an existing webview checkout.
+      or set ASCARIDOL_WEBVIEW_DIR to point at an existing webview checkout.
     MSG
   end
 
@@ -106,7 +88,7 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
       packages_root = File.join(spec.dir, 'packages')
       FileUtils.mkdir_p(packages_root)
 
-      Dir.mktmpdir('hypha-webview2-restore') do |tmp|
+      Dir.mktmpdir('ascaridol-webview2-restore') do |tmp|
         File.write(File.join(tmp, 'webview2.csproj'), <<~XML)
           <Project Sdk="Microsoft.NET.Sdk">
             <PropertyGroup>
@@ -125,12 +107,12 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
                    .reject { |d| File.basename(d).include?('-') }
                    .select { |d| File.exist?(File.join(d, sdk_header_rel)) }
                    .max_by { |d| File.basename(d).split('.').map(&:to_i) }
-      abort "[hypha-mrb] dotnet restore ran but no microsoft.web.webview2 in #{packages_root}" unless pkg_dir
-      puts "[hypha-mrb] using WebView2 SDK at #{pkg_dir}"
+      abort "[ascaridol] dotnet restore ran but no microsoft.web.webview2 in #{packages_root}" unless pkg_dir
+      puts "[ascaridol] using WebView2 SDK at #{pkg_dir}"
     end
 
     sdk_inc = File.join(pkg_dir, 'build', 'native', 'include')
-    abort "[hypha-mrb] WebView2.h not found at #{sdk_inc}" unless File.exist?(File.join(sdk_inc, 'WebView2.h'))
+    abort "[ascaridol] WebView2.h not found at #{sdk_inc}" unless File.exist?(File.join(sdk_inc, 'WebView2.h'))
 
     spec.cc.include_paths  << sdk_inc
     spec.cxx.include_paths << sdk_inc
@@ -139,14 +121,14 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
     # Win32 manifest: UTF-8 codepage, long paths, per-monitor DPI v2,
     # Common-Controls 6 dependency for themed menus.
     # ----------------------------------------------------------------------
-    rc_src     = File.join(spec.dir, 'data', 'mruby-webview.rc')
+    rc_src     = File.join(spec.dir, 'data', 'ascaridol.rc')
     rc_obj_dir = File.join(build.build_dir, 'mrbgems', spec.name)
     FileUtils.mkdir_p(rc_obj_dir)
 
     rc_obj = if toolchains.include?('visualcpp')
-      File.join(rc_obj_dir, 'mruby-webview.res')
+      File.join(rc_obj_dir, 'ascaridol.res')
     else
-      File.join(rc_obj_dir, 'mruby-webview.res.o')
+      File.join(rc_obj_dir, 'ascaridol.res.o')
     end
 
     if toolchains.include?('visualcpp')
@@ -167,31 +149,21 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
     spec.linker.libraries << 'c++'
 
   else
-    pkg = ENV['HYPHA_WEBVIEW_PKG']
+    pkg = ENV['ASCARIDOL_WEBVIEW_PKG']
     pkg ||= %w[gtk4 webkitgtk-6.0].all?       { |p| system("pkg-config --exists #{p}") } ? 'gtk4 webkitgtk-6.0'      : nil
     pkg ||= %w[gtk+-3.0 webkit2gtk-4.1].all?  { |p| system("pkg-config --exists #{p}") } ? 'gtk+-3.0 webkit2gtk-4.1' : nil
     pkg ||= %w[gtk+-3.0 webkit2gtk-4.0].all?  { |p| system("pkg-config --exists #{p}") } ? 'gtk+-3.0 webkit2gtk-4.0' : nil
 
     abort <<~MSG unless pkg
-      [hypha-mrb] no GTK + WebKitGTK development packages found via pkg-config.
+      [ascaridol] no GTK + WebKitGTK development packages found via pkg-config.
       Install one of:
         - gtk4 + webkitgtk-6.0   (Debian/Ubuntu: libgtk-4-dev libwebkitgtk-6.0-dev)
         - gtk+-3.0 + webkit2gtk-4.1   (libgtk-3-dev libwebkit2gtk-4.1-dev)
         - gtk+-3.0 + webkit2gtk-4.0   (libgtk-3-dev libwebkit2gtk-4.0-dev)
-      Or set HYPHA_WEBVIEW_PKG to a custom pkg-config package list.
+      Or set ASCARIDOL_WEBVIEW_PKG to a custom pkg-config package list.
     MSG
 
-    `pkg-config --cflags #{pkg}`.strip.split(/\s+/).reject(&:empty?).each do |f|
-      case f
-      when /\A-I(.+)/ then spec.cc.include_paths << $1; spec.cxx.include_paths << $1
-      when /\A-D(.+)/ then spec.cc.defines       << $1; spec.cxx.defines       << $1
-      else                 spec.cc.flags         << f;  spec.cxx.flags         << f
-      end
-    end
-
-    spec.linker.flags_after_libraries.concat(`pkg-config --libs #{pkg}`.strip.split(/\s+/).reject(&:empty?))
-    spec.linker.libraries << 'stdc++'
-    spec.linker.libraries << 'pthread'
+    spec.search_package(pkg)
   end
 
   if is_windows
@@ -200,5 +172,5 @@ MRuby::Gem::Specification.new('hypha-mrb') do |spec|
       spec.cxx.flags << '-std=c++20'
   end
 
-  spec.bins = %w(hypha)
+  spec.bins = %w(ascaridol)
 end

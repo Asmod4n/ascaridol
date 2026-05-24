@@ -1,16 +1,16 @@
-# Minimal "hello world" example for Hypha.
+# Minimal "hello world" example for Ascaridol.
 #
 # Build:
-#   conf.gem '<path-to-hypha-mrb>' do |hypha|
-#     hypha.hypha_main = 'example/hello.rb'
+#   conf.gem '<path-to-ascaridol-mrb>' do |ascaridol|
+#     ascaridol.ascaridol_main = 'example/hello.rb'
 #   end
 #   rake
 #
 # Run:
-#   mruby/build/host/bin/hypha
+#   mruby/build/host/bin/ascaridol
 #
 # Shows: window creation, html=, bind, calling Ruby from JS,
-# and Hypha.ready firing once before the run loop starts pumping.
+# and Ascaridol.ready firing once before the run loop starts pumping.
 
 html = <<~HTML
   <!doctype html>
@@ -40,16 +40,18 @@ html = <<~HTML
   </html>
 HTML
 
-Hypha.ready {
-  Hypha.eval("document.getElementById('status').textContent = 'Ready — fired from Hypha.ready'")
-  puts "Hypha is ready to use"
+Ascaridol.ready {
+  Ascaridol.eval("document.getElementById('status').textContent = 'Ready — fired from Ascaridol.ready'")
+  puts "Ascaridol is ready to use"
 }
 
-Hypha.run(title: 'mruby-webview demo', size: [640, 480]) do |w|
+def main
+  Ascaridol.run(title: 'mruby-webview demo', size: [640, 480]) do |w|
 
-  w.bind(:greet) do |name|
-    "Hello, #{name}! (replied at #{Time.now rescue 'now'})"
+    w.bind(:greet) do |name|
+      "Hello, #{name}! (replied at #{Time.now rescue 'now'})"
+    end
+
+    w.html = html
   end
-
-  w.html = html
 end

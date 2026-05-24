@@ -1,22 +1,22 @@
 /*
- * hypha_methods.cpp — Hypha module methods that don't need platform code.
+ * ascaridol_methods.cpp — Ascaridol module methods that don't need platform code.
  *
  * What lives here:
  *   - The two globals that pin the architecture: g_main_mrb, g_wv.
  *     Definitions are here so they sit in libmruby.lib; other binaries
- *     that link libmruby.lib see harmless null atomics, and the hypha
- *     binary's tools/hypha/hypha.cpp reads/writes them via the externs
+ *     that link libmruby.lib see harmless null atomics, and the ascaridol
+ *     binary's tools/ascaridol/ascaridol.cpp reads/writes them via the externs
  *     in webview_internal.h.
  *
  *   - Methods that act on the live webview without any platform-specific
  *     work: title=, html=, url=, eval, init, terminate, set_size,
  *     resolve. Each follows the same pattern: extract args, gate
- *     on g_wv, branch on hypha_in_main_state(mrb) — direct call on main,
+ *     on g_wv, branch on ascaridol_in_main_state(mrb) — direct call on main,
  *     webview::dispatch(lambda) off main. Lambdas capture only plain
  *     C++ data (std::string, int, bool); never mrb_value, never pointers
  *     into the caller's mrb_state.
  *
- *   - Hypha.dispatch: the cross-thread proc carrier. The proc is dumped
+ *   - Ascaridol.dispatch: the cross-thread proc carrier. The proc is dumped
  *     via mruby-proc-irep-ext (#to_irep_bytecode), args are CBOR-encoded
  *     as an array, both captured as std::string into the dispatch lambda.
  *     On main, the lambda decodes against g_main_mrb and yields. The
@@ -27,14 +27,14 @@
  *   - Always-safe methods: version (static webview C call), platform
  *     (build-time constant), running? (atomic load).
  *
- * What lives in tools/hypha/hypha.cpp instead:
+ * What lives in tools/ascaridol/ascaridol.cpp instead:
  *   - bind / unbind: the Proc holds onto its mrb_state's environment for
  *     its lifetime. Setup-time on main, no cross-thread story.
  *   - add_native_event / remove_native_event: platform-specific fd
  *     watchers (GTK / CFFileDescriptor / WSAAsyncSelect+HWND), main-only.
  *   - bindings, window_handle, handle: read state that lives only in
  *     main's mrb_state. Main-only.
- *   - Hypha.run, Hypha.ready: the lifecycle entry points.
+ *   - Ascaridol.run, Ascaridol.ready: the lifecycle entry points.
  */
 
 #include <mruby.h>
@@ -64,9 +64,9 @@
  /* Globals.                                                                  */
  /*                                                                           */
  /* Defined here so they sit in libmruby.lib. Other binaries that link        */
- /* libmruby.lib see them as null atomics, and every Hypha.* call routes     */
- /* to the "Hypha is not running" error path. The hypha binary stores into  */
- /* them from tools/hypha/hypha.cpp's main() and Hypha.run.                 */
+ /* libmruby.lib see them as null atomics, and every Ascaridol.* call routes     */
+ /* to the "Ascaridol is not running" error path. The ascaridol binary stores into  */
+ /* them from tools/ascaridol/ascaridol.cpp's main() and Ascaridol.run.                 */
  /* ========================================================================= */
 
 std::atomic<mrb_state*>        g_main_mrb{ nullptr };
@@ -78,9 +78,9 @@ std::atomic<webview::webview*> g_wv{ nullptr };
 /* ========================================================================= */
 
 struct RClass*
-hypha_error_class(mrb_state* mrb, webview_error_t err)
+ascaridol_error_class(mrb_state* mrb, webview_error_t err)
 {
-    struct RClass* base = mrb_module_get_id(mrb, MRB_SYM(Hypha));
+    struct RClass* base = mrb_module_get_id(mrb, MRB_SYM(Ascaridol));
     mrb_sym name;
     switch (err) {
         case WEBVIEW_ERROR_MISSING_DEPENDENCY: name = MRB_SYM(MissingDependencyError); break;
@@ -96,7 +96,7 @@ hypha_error_class(mrb_state* mrb, webview_error_t err)
 }
 
 void
-hypha_check(mrb_state* mrb, webview_error_t code, const std::string& msg)
+ascaridol_check(mrb_state* mrb, webview_error_t code, const std::string& msg)
 {
     if (code == WEBVIEW_ERROR_OK) return;
     if (!mrb) return;   /* no caller to raise to (shutdown race) */
@@ -111,7 +111,7 @@ hypha_check(mrb_state* mrb, webview_error_t code, const std::string& msg)
         case WEBVIEW_ERROR_UNSPECIFIED:
         default:                               fallback = "unspecified error"; break;
     }
-    mrb_raise(mrb, hypha_error_class(mrb, code),
+    mrb_raise(mrb, ascaridol_error_class(mrb, code),
               msg.empty() ? fallback : msg.c_str());
 }
 
@@ -120,19 +120,19 @@ hypha_check(mrb_state* mrb, webview_error_t code, const std::string& msg)
 /* ========================================================================= */
 
 static webview::webview*
-hypha_require_running(mrb_state* mrb)
+ascaridol_require_running(mrb_state* mrb)
 {
     webview::webview* wv = g_wv.load(std::memory_order_acquire);
     if (!wv) {
         mrb_raise(mrb, E_RUNTIME_ERROR,
-            "Hypha is not running (Hypha.run hasn't been called, "
+            "Ascaridol is not running (Ascaridol.run hasn't been called, "
             "or the run loop has already exited)");
     }
     return wv;
 }
 
 /* ========================================================================= */
-/* CBOR-based proc / value serialization for Hypha.dispatch.                */
+/* CBOR-based proc / value serialization for Ascaridol.dispatch.                */
 /* ========================================================================= */
 static std::string
 serialize_value_to_cbor(mrb_state* mrb, mrb_value v)
@@ -164,128 +164,128 @@ deserialize_proc_from_cbor(mrb_state* mrb, const std::string& payload)
 }
 
 /* ========================================================================= */
-/* Hypha module methods                                                      */
+/* Ascaridol module methods                                                      */
 /* ========================================================================= */
 
-/* Hypha.title=(s) ---------------------------------------------------------- */
+/* Ascaridol.title=(s) ---------------------------------------------------------- */
 static mrb_value
-mrb_hypha_set_title(mrb_state* mrb, mrb_value /*self*/)
+mrb_ascaridol_set_title(mrb_state* mrb, mrb_value /*self*/)
 {
     const char* s; mrb_int len;
     mrb_get_args(mrb, "s", &s, &len);
     std::string title(s, static_cast<size_t>(len));
 
-    webview::webview* wv = hypha_require_running(mrb);
+    webview::webview* wv = ascaridol_require_running(mrb);
 
-    if (hypha_in_main_state(mrb)) {
-        hypha_check_result(mrb, wv->set_title(title));
+    if (ascaridol_in_main_state(mrb)) {
+        ascaridol_check_result(mrb, wv->set_title(title));
     }
     else {
         wv->dispatch([title = std::move(title)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_protect_on_main([&](mrb_state* m) {
-                hypha_check_result(m, w->set_title(title));
+            ascaridol_protect_on_main([&](mrb_state* m) {
+                ascaridol_check_result(m, w->set_title(title));
             });
             });
     }
     return mrb_nil_value();
 }
 
-/* Hypha.html=(s) ----------------------------------------------------------- */
+/* Ascaridol.html=(s) ----------------------------------------------------------- */
 static mrb_value
-mrb_hypha_set_html(mrb_state* mrb, mrb_value /*self*/)
+mrb_ascaridol_set_html(mrb_state* mrb, mrb_value /*self*/)
 {
     const char* s; mrb_int len;
     mrb_get_args(mrb, "s", &s, &len);
     std::string html(s, static_cast<size_t>(len));
 
-    webview::webview* wv = hypha_require_running(mrb);
+    webview::webview* wv = ascaridol_require_running(mrb);
 
-    if (hypha_in_main_state(mrb)) {
-        hypha_check_result(mrb, wv->set_html(html));
+    if (ascaridol_in_main_state(mrb)) {
+        ascaridol_check_result(mrb, wv->set_html(html));
     }
     else {
         wv->dispatch([html = std::move(html)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_protect_on_main([&](mrb_state* m) {
-                hypha_check_result(m, w->set_html(html));
+            ascaridol_protect_on_main([&](mrb_state* m) {
+                ascaridol_check_result(m, w->set_html(html));
             });
             });
     }
     return mrb_nil_value();
 }
 
-/* Hypha.url=(s) / Hypha.navigate(s) --------------------------------------- */
+/* Ascaridol.url=(s) / Ascaridol.navigate(s) --------------------------------------- */
 static mrb_value
-mrb_hypha_navigate(mrb_state* mrb, mrb_value /*self*/)
+mrb_ascaridol_navigate(mrb_state* mrb, mrb_value /*self*/)
 {
     const char* s; mrb_int len;
     mrb_get_args(mrb, "s", &s, &len);
     std::string url(s, static_cast<size_t>(len));
 
-    webview::webview* wv = hypha_require_running(mrb);
+    webview::webview* wv = ascaridol_require_running(mrb);
 
-    if (hypha_in_main_state(mrb)) {
-        hypha_check_result(mrb, wv->navigate(url));
+    if (ascaridol_in_main_state(mrb)) {
+        ascaridol_check_result(mrb, wv->navigate(url));
     }
     else {
         wv->dispatch([url = std::move(url)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_protect_on_main([&](mrb_state* m) {
-                hypha_check_result(m, w->navigate(url));
+            ascaridol_protect_on_main([&](mrb_state* m) {
+                ascaridol_check_result(m, w->navigate(url));
             });
             });
     }
     return mrb_nil_value();
 }
 
-/* Hypha.eval(js) ----------------------------------------------------------- */
+/* Ascaridol.eval(js) ----------------------------------------------------------- */
 static mrb_value
-mrb_hypha_eval(mrb_state* mrb, mrb_value /*self*/)
+mrb_ascaridol_eval(mrb_state* mrb, mrb_value /*self*/)
 {
     const char* s; mrb_int len;
     mrb_get_args(mrb, "s", &s, &len);
     std::string js(s, static_cast<size_t>(len));
 
-    webview::webview* wv = hypha_require_running(mrb);
+    webview::webview* wv = ascaridol_require_running(mrb);
 
-    if (hypha_in_main_state(mrb)) {
-        hypha_check_result(mrb, wv->eval(js));
+    if (ascaridol_in_main_state(mrb)) {
+        ascaridol_check_result(mrb, wv->eval(js));
     }
     else {
         wv->dispatch([js = std::move(js)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_protect_on_main([&](mrb_state* m) {
-                hypha_check_result(m, w->eval(js));
+            ascaridol_protect_on_main([&](mrb_state* m) {
+                ascaridol_check_result(m, w->eval(js));
             });
             });
     }
     return mrb_nil_value();
 }
 
-/* Hypha.init(js) — JS to run on every page load --------------------------- */
+/* Ascaridol.init(js) — JS to run on every page load --------------------------- */
 static mrb_value
-mrb_hypha_init(mrb_state* mrb, mrb_value /*self*/)
+mrb_ascaridol_init(mrb_state* mrb, mrb_value /*self*/)
 {
     const char* s; mrb_int len;
     mrb_get_args(mrb, "s", &s, &len);
     std::string js(s, static_cast<size_t>(len));
 
-    webview::webview* wv = hypha_require_running(mrb);
+    webview::webview* wv = ascaridol_require_running(mrb);
 
-    if (hypha_in_main_state(mrb)) {
-        hypha_check_result(mrb, wv->init(js));
+    if (ascaridol_in_main_state(mrb)) {
+        ascaridol_check_result(mrb, wv->init(js));
     }
     else {
         wv->dispatch([js = std::move(js)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_protect_on_main([&](mrb_state* m) {
-                hypha_check_result(m, w->init(js));
+            ascaridol_protect_on_main([&](mrb_state* m) {
+                ascaridol_check_result(m, w->init(js));
             });
             });
     }
@@ -294,7 +294,7 @@ mrb_hypha_init(mrb_state* mrb, mrb_value /*self*/)
 
 /* size hint Symbol → webview_hint_t int ----------------------------------- */
 static int
-hypha_size_hint_from_sym(mrb_state* mrb, mrb_value v)
+ascaridol_size_hint_from_sym(mrb_state* mrb, mrb_value v)
 {
     if (mrb_nil_p(v))    return WEBVIEW_HINT_NONE;
     if (!mrb_symbol_p(v)) {
@@ -309,45 +309,45 @@ hypha_size_hint_from_sym(mrb_state* mrb, mrb_value v)
     return WEBVIEW_HINT_NONE;   /* unreachable */
 }
 
-/* Hypha.set_size(w, h, hint=:none) ---------------------------------------- */
+/* Ascaridol.set_size(w, h, hint=:none) ---------------------------------------- */
 static mrb_value
-mrb_hypha_set_size(mrb_state* mrb, mrb_value /*self*/)
+mrb_ascaridol_set_size(mrb_state* mrb, mrb_value /*self*/)
 {
     mrb_int w, h;
     mrb_value hint_v = mrb_nil_value();
     mrb_get_args(mrb, "ii|o!", &w, &h, &hint_v);
-    int hint = hypha_size_hint_from_sym(mrb, hint_v);
+    int hint = ascaridol_size_hint_from_sym(mrb, hint_v);
 
-    webview::webview* wv = hypha_require_running(mrb);
+    webview::webview* wv = ascaridol_require_running(mrb);
 
     int wi = static_cast<int>(w);
     int hi = static_cast<int>(h);
 
-    if (hypha_in_main_state(mrb)) {
-        hypha_check_result(mrb, wv->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
+    if (ascaridol_in_main_state(mrb)) {
+        ascaridol_check_result(mrb, wv->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
     }
     else {
         wv->dispatch([wi, hi, hint]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_protect_on_main([&](mrb_state* m) {
-                hypha_check_result(m, w->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
+            ascaridol_protect_on_main([&](mrb_state* m) {
+                ascaridol_check_result(m, w->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
             });
             });
     }
     return mrb_nil_value();
 }
 
-/* Hypha.size=([w, h, hint]) ---------------------------------------------- */
+/* Ascaridol.size=([w, h, hint]) ---------------------------------------------- */
 static mrb_value
-mrb_hypha_size_setter(mrb_state* mrb, mrb_value self)
+mrb_ascaridol_size_setter(mrb_state* mrb, mrb_value self)
 {
     mrb_value ary;
     mrb_get_args(mrb, "A", &ary);
     mrb_int n = RARRAY_LEN(ary);
     if (n < 2 || n > 3) {
         mrb_raisef(mrb, E_ARGUMENT_ERROR,
-            "Hypha.size= expects [w, h] or [w, h, hint], got %i elements",
+            "Ascaridol.size= expects [w, h] or [w, h, hint], got %i elements",
             n);
     }
     mrb_value w_v = mrb_ary_ref(mrb, ary, 0);
@@ -356,50 +356,50 @@ mrb_hypha_size_setter(mrb_state* mrb, mrb_value self)
 
     mrb_int w = mrb_integer(mrb_to_int(mrb, w_v));
     mrb_int h = mrb_integer(mrb_to_int(mrb, h_v));
-    int hint = hypha_size_hint_from_sym(mrb, hint_v);
+    int hint = ascaridol_size_hint_from_sym(mrb, hint_v);
 
-    webview::webview* wv = hypha_require_running(mrb);
+    webview::webview* wv = ascaridol_require_running(mrb);
 
     int wi = static_cast<int>(w);
     int hi = static_cast<int>(h);
 
-    if (hypha_in_main_state(mrb)) {
-        hypha_check_result(mrb, wv->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
+    if (ascaridol_in_main_state(mrb)) {
+        ascaridol_check_result(mrb, wv->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
     }
     else {
         wv->dispatch([wi, hi, hint]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_protect_on_main([&](mrb_state* m) {
-                hypha_check_result(m, w->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
+            ascaridol_protect_on_main([&](mrb_state* m) {
+                ascaridol_check_result(m, w->set_size(wi, hi, static_cast<webview_hint_t>(hint)));
             });
             });
     }
     return self;
 }
 
-/* Hypha.terminate --------------------------------------------------------- */
+/* Ascaridol.terminate --------------------------------------------------------- */
 static mrb_value
-mrb_hypha_terminate(mrb_state* mrb, mrb_value /*self*/)
+mrb_ascaridol_terminate(mrb_state* mrb, mrb_value /*self*/)
 {
-    webview::webview* wv = hypha_require_running(mrb);
+    webview::webview* wv = ascaridol_require_running(mrb);
 
-    if (hypha_in_main_state(mrb)) {
-        hypha_check_result(mrb, wv->terminate());
+    if (ascaridol_in_main_state(mrb)) {
+        ascaridol_check_result(mrb, wv->terminate());
     }
     else {
         wv->dispatch([]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_protect_on_main([&](mrb_state* m) {
-                hypha_check_result(m, w->terminate());
+            ascaridol_protect_on_main([&](mrb_state* m) {
+                ascaridol_check_result(m, w->terminate());
             });
             });
     }
     return mrb_nil_value();
 }
 
-/* Hypha.resolve(id) { ... } — run block, JSON-encode the result, ship to */
+/* Ascaridol.resolve(id) { ... } — run block, JSON-encode the result, ship to */
 /* main and call wv->resolve. If the block raises, encode the exception as */
 /* {name, message, backtrace} and resolve with status=1. The JSON-dump step */
 /* itself is also protected (circular refs etc.) and falls back to a       */
@@ -408,18 +408,18 @@ mrb_hypha_terminate(mrb_state* mrb, mrb_value /*self*/)
 /* Safe to call from a worker mrb: the block runs synchronously on the     */
 /* caller's mrb, the resulting bytes get dispatched to main as std::string.*/
 static mrb_value
-mrb_hypha_resolve(mrb_state* mrb, mrb_value /*self*/)
+mrb_ascaridol_resolve(mrb_state* mrb, mrb_value /*self*/)
 {
     const char* id_p; mrb_int id_len;
     mrb_value blk = mrb_nil_value();
     mrb_get_args(mrb, "s&", &id_p, &id_len, &blk);
     if (mrb_nil_p(blk)) {
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "Hypha.resolve requires a block");
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "Ascaridol.resolve requires a block");
     }
 
     std::string id_s(id_p, static_cast<size_t>(id_len));
 
-    webview::webview* wv = hypha_require_running(mrb);
+    webview::webview* wv = ascaridol_require_running(mrb);
 
     mrb_int ai = mrb_gc_arena_save(mrb);
 
@@ -479,14 +479,14 @@ mrb_hypha_resolve(mrb_state* mrb, mrb_value /*self*/)
 
     mrb_gc_arena_restore(mrb, ai);
 
-    if (hypha_in_main_state(mrb)) {
-        hypha_check_result(mrb, wv->resolve(id_s, status, json));
+    if (ascaridol_in_main_state(mrb)) {
+        ascaridol_check_result(mrb, wv->resolve(id_s, status, json));
     }
     else {
         wv->dispatch([id_s = std::move(id_s), status, json = std::move(json)]() {
             webview::webview* w = g_wv.load(std::memory_order_acquire);
             if (!w) return;
-            hypha_check_result(g_main_mrb.load(std::memory_order_acquire),
+            ascaridol_check_result(g_main_mrb.load(std::memory_order_acquire),
                                w->resolve(id_s, status, json));
         });
     }
@@ -494,21 +494,21 @@ mrb_hypha_resolve(mrb_state* mrb, mrb_value /*self*/)
     return mrb_nil_value();
 }
 
-/* Hypha.dispatch(*args, &blk) — fire-and-forget proc dispatch onto main.  */
+/* Ascaridol.dispatch(*args, &blk) — fire-and-forget proc dispatch onto main.  */
 static mrb_value
-mrb_hypha_dispatch(mrb_state* mrb, mrb_value /*self*/)
+mrb_ascaridol_dispatch(mrb_state* mrb, mrb_value /*self*/)
 {
     mrb_value* argv;
     mrb_int argc;
     mrb_value blk = mrb_nil_value();
     mrb_get_args(mrb, "*&", &argv, &argc, &blk);
     if (mrb_nil_p(blk)) {
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "Hypha.dispatch requires a block");
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "Ascaridol.dispatch requires a block");
     }
 
-    webview::webview* wv = hypha_require_running(mrb);
+    webview::webview* wv = ascaridol_require_running(mrb);
 
-    if (hypha_in_main_state(mrb)) {
+    if (ascaridol_in_main_state(mrb)) {
         /* fast path: yield directly with mrb_protect_error */
 
         struct ctx { mrb_value blk; mrb_value* argv; mrb_int argc; };
@@ -587,9 +587,9 @@ mrb_hypha_dispatch(mrb_state* mrb, mrb_value /*self*/)
     return mrb_nil_value();
 }
 
-/* Hypha.version — webview version info Hash. ----------------------------- */
+/* Ascaridol.version — webview version info Hash. ----------------------------- */
 static mrb_value
-mrb_hypha_version(mrb_state* mrb, mrb_value /*self*/)
+mrb_ascaridol_version(mrb_state* mrb, mrb_value /*self*/)
 {
     const webview_version_info_t* info = webview_version();
     mrb_value h = mrb_hash_new_capa(mrb, 6);
@@ -608,9 +608,9 @@ mrb_hypha_version(mrb_state* mrb, mrb_value /*self*/)
     return h;
 }
 
-/* Hypha.platform — :macos | :windows | :linux | :unknown. ---------------- */
+/* Ascaridol.platform — :macos | :windows | :linux | :unknown. ---------------- */
 static mrb_value
-mrb_hypha_platform(mrb_state* /*mrb*/, mrb_value /*self*/)
+mrb_ascaridol_platform(mrb_state* /*mrb*/, mrb_value /*self*/)
 {
 #if defined(WEBVIEW_COCOA)
     return mrb_symbol_value(MRB_SYM(macos));
@@ -623,20 +623,20 @@ mrb_hypha_platform(mrb_state* /*mrb*/, mrb_value /*self*/)
 #endif
 }
 
-/* Hypha.running? — true iff a webview instance exists. ------------------- */
+/* Ascaridol.running? — true iff a webview instance exists. ------------------- */
 static mrb_value
-mrb_hypha_running_p(mrb_state* /*mrb*/, mrb_value /*self*/)
+mrb_ascaridol_running_p(mrb_state* /*mrb*/, mrb_value /*self*/)
 {
     return mrb_bool_value(g_wv.load(std::memory_order_acquire) != nullptr);
 }
 
 static mrb_value
-mrb_hypha_test_dispatch_raise(mrb_state* mrb, mrb_value /*self*/)
+mrb_ascaridol_test_dispatch_raise(mrb_state* mrb, mrb_value /*self*/)
 {
-    webview::webview* wv = hypha_require_running(mrb);
+    webview::webview* wv = ascaridol_require_running(mrb);
     wv->dispatch([]() {
         fprintf(stderr, "[test] entered dispatch lambda\n");
-        hypha_protect_on_main([](mrb_state* mrb) {
+        ascaridol_protect_on_main([](mrb_state* mrb) {
             mrb_raise(mrb, E_RUNTIME_ERROR, "induced from dispatch");
             fprintf(stderr, "[test] AFTER raise (should not print)\n");
         });
@@ -648,70 +648,70 @@ mrb_hypha_test_dispatch_raise(mrb_state* mrb, mrb_value /*self*/)
 /* ========================================================================= */
 /* gem_init                                                                  */
 /*                                                                           */
-/* Registers the methods above. tools/hypha/hypha.cpp's hypha_install_      */
-/* runtime adds Hypha.run, Hypha.ready, Hypha.bind, Hypha.unbind,           */
-/* Hypha.add_native_event, Hypha.remove_native_event, Hypha.bindings,      */
-/* Hypha.window_handle, Hypha.handle, plus the error class hierarchy and   */
+/* Registers the methods above. tools/ascaridol/ascaridol.cpp's ascaridol_install_      */
+/* runtime adds Ascaridol.run, Ascaridol.ready, Ascaridol.bind, Ascaridol.unbind,           */
+/* Ascaridol.add_native_event, Ascaridol.remove_native_event, Ascaridol.bindings,      */
+/* Ascaridol.window_handle, Ascaridol.handle, plus the error class hierarchy and   */
 /* the _FDUD/_WndCtx helper classes.                                       */
 /* ========================================================================= */
 
 MRB_BEGIN_DECL
 void
-mrb_hypha_mrb_gem_init(mrb_state* mrb)
+mrb_ascaridol_gem_init(mrb_state* mrb)
 {
-    struct RClass* hypha = mrb_define_module_id(mrb, MRB_SYM(Hypha));
+    struct RClass* ascaridol = mrb_define_module_id(mrb, MRB_SYM(Ascaridol));
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM_E(title),
-        mrb_hypha_set_title, MRB_ARGS_REQ(1));
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(set_title),
-        mrb_hypha_set_title, MRB_ARGS_REQ(1));
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM_E(title),
+        mrb_ascaridol_set_title, MRB_ARGS_REQ(1));
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM(set_title),
+        mrb_ascaridol_set_title, MRB_ARGS_REQ(1));
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM_E(html),
-        mrb_hypha_set_html, MRB_ARGS_REQ(1));
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(set_html),
-        mrb_hypha_set_html, MRB_ARGS_REQ(1));
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM_E(html),
+        mrb_ascaridol_set_html, MRB_ARGS_REQ(1));
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM(set_html),
+        mrb_ascaridol_set_html, MRB_ARGS_REQ(1));
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM_E(url),
-        mrb_hypha_navigate, MRB_ARGS_REQ(1));
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(navigate),
-        mrb_hypha_navigate, MRB_ARGS_REQ(1));
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM_E(url),
+        mrb_ascaridol_navigate, MRB_ARGS_REQ(1));
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM(navigate),
+        mrb_ascaridol_navigate, MRB_ARGS_REQ(1));
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(eval),
-        mrb_hypha_eval, MRB_ARGS_REQ(1));
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM(eval),
+        mrb_ascaridol_eval, MRB_ARGS_REQ(1));
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(init),
-        mrb_hypha_init, MRB_ARGS_REQ(1));
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM(init),
+        mrb_ascaridol_init, MRB_ARGS_REQ(1));
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(set_size),
-        mrb_hypha_set_size, MRB_ARGS_ARG(2, 1));
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM_E(size),
-        mrb_hypha_size_setter, MRB_ARGS_REQ(1));
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM(set_size),
+        mrb_ascaridol_set_size, MRB_ARGS_ARG(2, 1));
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM_E(size),
+        mrb_ascaridol_size_setter, MRB_ARGS_REQ(1));
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(resolve),
-        mrb_hypha_resolve, MRB_ARGS_REQ(1) | MRB_ARGS_BLOCK());
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM(resolve),
+        mrb_ascaridol_resolve, MRB_ARGS_REQ(1) | MRB_ARGS_BLOCK());
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(terminate),
-        mrb_hypha_terminate, MRB_ARGS_NONE());
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM(terminate),
+        mrb_ascaridol_terminate, MRB_ARGS_NONE());
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(dispatch),
-        mrb_hypha_dispatch,
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM(dispatch),
+        mrb_ascaridol_dispatch,
         MRB_ARGS_ANY() | MRB_ARGS_BLOCK());
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(version),
-        mrb_hypha_version, MRB_ARGS_NONE());
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM(version),
+        mrb_ascaridol_version, MRB_ARGS_NONE());
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(platform),
-        mrb_hypha_platform, MRB_ARGS_NONE());
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM(platform),
+        mrb_ascaridol_platform, MRB_ARGS_NONE());
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM_Q(running),
-        mrb_hypha_running_p, MRB_ARGS_NONE());
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM_Q(running),
+        mrb_ascaridol_running_p, MRB_ARGS_NONE());
 
-    mrb_define_class_method_id(mrb, hypha, MRB_SYM(_test_dispatch_raise),
-        mrb_hypha_test_dispatch_raise, MRB_ARGS_NONE());
+    mrb_define_class_method_id(mrb, ascaridol, MRB_SYM(_test_dispatch_raise),
+        mrb_ascaridol_test_dispatch_raise, MRB_ARGS_NONE());
 }
 
 void
-mrb_hypha_mrb_gem_final(mrb_state* /*mrb*/)
+mrb_ascaridol_gem_final(mrb_state* /*mrb*/)
 {
 }
 MRB_END_DECL

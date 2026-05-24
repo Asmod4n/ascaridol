@@ -1,13 +1,13 @@
-# Live introspection dashboard for Hypha.
+# Live introspection dashboard for Ascaridol.
 #
 # Build:
-#   conf.gem '<path-to-hypha-mrb>' do |hypha|
-#     hypha.hypha_main = File.expand_path('example/dashboard.rb', __dir__)
+#   conf.gem '<path-to-ascaridol-mrb>' do |ascaridol|
+#     ascaridol.ascaridol_main = File.expand_path('example/dashboard.rb', __dir__)
 #   end
 #   rake
 #
 # Run:
-#   mruby/build/host/bin/hypha
+#   mruby/build/host/bin/ascaridol
 #
 # Demonstrates:
 #   - rb-indicator: busy bar shown while a Ruby binding runs
@@ -22,7 +22,7 @@
 # ---- collectors -----------------------------------------------------------
 
 def webview_info
-  v = Hypha.version rescue nil
+  v = Ascaridol.version rescue nil
   return { "available" => "false" } unless v
   {
     "version"         => v[:version],
@@ -240,7 +240,7 @@ end
 def render_page(w_bindings)
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>dashboard</title>
-    #{Hypha.html_router(:route)}<style>#{CSS}</style></head>
+    #{Ascaridol.html_router(:route)}<style>#{CSS}</style></head>
     <body><h1>MRUBY-WEBVIEW DASHBOARD</h1>
     <div class="grid">
       #{render_webview_panel}
@@ -267,8 +267,9 @@ def route(method, path, params)
   end
 end
 
-
-    Hypha.run(title: "dashboard x mruby", size: [900, 720]) do |w|
-      w.bind(:route) { |m, p, params| route(m, p, params) }
-      w.html = render_page(w.bindings.map(&:to_s))
-    end
+def main
+  Ascaridol.run(title: "dashboard x mruby", size: [900, 720]) do |w|
+    w.bind(:route) { |m, p, params| route(m, p, params) }
+    w.html = render_page(w.bindings.map(&:to_s))
+  end
+end

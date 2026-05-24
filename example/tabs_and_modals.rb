@@ -1,13 +1,13 @@
-# Tabs + modal dialogs in Hypha, htmx-style, with mruby-mustache.
+# Tabs + modal dialogs in Ascaridol, htmx-style, with mruby-mustache.
 #
 # Build:
-#   conf.gem '<path-to-hypha-mrb>' do |hypha|
-#     hypha.hypha_main = File.expand_path('example/tabs_and_modals.rb', __dir__)
+#   conf.gem '<path-to-ascaridol-mrb>' do |ascaridol|
+#     ascaridol.ascaridol_main = File.expand_path('example/tabs_and_modals.rb', __dir__)
 #   end
 #   rake
 #
 # Run:
-#   mruby/build/host/bin/hypha
+#   mruby/build/host/bin/ascaridol
 #
 # Demonstrates:
 #   - Server-rendered tab switching (no client state)
@@ -15,7 +15,7 @@
 #   - Pre-compiled Mustache templates as partials
 #   - rb-swap variants: outerHTML, beforeend, and synthetic delete
 #
-# mruby-mustache is a transitive dep of hypha-mrb — no extra conf.gem needed.
+# mruby-mustache is a transitive dep of ascaridol-mrb — no extra conf.gem needed.
 
 PROJECTS = [
   { id: 1, name: 'atlas',  status: 'shipping',  owner: 'alice', desc: 'Cross-platform GUI runtime built on system webviews. Now in beta.' },
@@ -241,7 +241,7 @@ end
 
 def page_html
   render('page',
-         router_script: Hypha.html_router(:route),
+         router_script: Ascaridol.html_router(:route),
          css:           CSS,
          main:          main_html('projects'))
 end
@@ -286,7 +286,9 @@ def route(method, path, _params)
   end || render('not_found', method: method, path: path)
 end
 
-Hypha.run(title: 'tabs + modals x mruby', size: [820, 620]) do |w|
-  w.bind(:route) { |m, p, params| route(m, p, params) }
-  w.html = page_html
+def main
+  Ascaridol.run(title: 'tabs + modals x mruby', size: [820, 620]) do |w|
+    w.bind(:route) { |m, p, params| route(m, p, params) }
+    w.html = page_html
+  end
 end
