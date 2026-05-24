@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\hypha_methods.cc">
+    <ClCompile Include="src\ascaridol_methods.cc">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="vendor\webview\core\src\webview.cc">

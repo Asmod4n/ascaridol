@@ -2,8 +2,8 @@ require 'rake'
 require 'fileutils'
 
 MRUBY_CONFIG_PATH = File.expand_path(ENV["MRUBY_CONFIG"] || "build_config.rb")
-DEFAULT_SCRIPT    = File.expand_path("tools/hypha/stub.rb")
-EMBED_SOURCE      = File.expand_path("tools/hypha/main.c")
+DEFAULT_SCRIPT    = File.expand_path("tools/ascaridol/stub.rb")
+EMBED_SOURCE      = File.expand_path("tools/ascaridol/main.c")
 
 file :mruby do
   unless File.directory?('mruby')

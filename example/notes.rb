@@ -1,15 +1,15 @@
-# Persistent note-taking app for Hypha, using mruby-lmdb + mruby-cbor.
+# Persistent note-taking app for Ascaridol, using mruby-lmdb + mruby-cbor.
 #
 # Build:
-#   conf.gem '<path-to-hypha-mrb>' do |hypha|
-#     hypha.hypha_main = File.expand_path('example/notes.rb', __dir__)
+#   conf.gem '<path-to-ascaridol-mrb>' do |ascaridol|
+#     ascaridol.ascaridol_main = File.expand_path('example/notes.rb', __dir__)
 #   end
 #   rake
 #
 # Run:
-#   mruby/build/host/bin/hypha
+#   mruby/build/host/bin/ascaridol
 #
-# Dependencies are pulled in transitively by hypha-mrb (mruby-lmdb,
+# Dependencies are pulled in transitively by ascaridol-mrb (mruby-lmdb,
 # mruby-cbor, mruby-mustache), so no extra `conf.gem` lines are needed.
 #
 # Demonstrates:
@@ -150,7 +150,7 @@ CSS
 SOURCES = {
   'page' => <<~MUSTACHE,
     <!doctype html><html><head><meta charset="utf-8"><title>notes</title>
-    #{Hypha.html_router(:route)}<style>#{CSS}</style></head>
+    #{Ascaridol.html_router(:route)}<style>#{CSS}</style></head>
     <body>
     {{^has_deps}}<div class="dep-banner">mruby-lmdb / mruby-cbor not loaded — running in read-only demo mode</div>{{/has_deps}}
     <header>
@@ -321,9 +321,11 @@ def route(method, path, params)
   result || render('not_found', method: method, path: path)
 end
 
-Hypha.run(title: "notes x mruby", size: [900, 620]) do |w|
-  w.bind(:route) do |m, p, params|
-    route(m, p, params || {})
+def main
+  Ascaridol.run(title: "notes x mruby", size: [900, 620]) do |w|
+    w.bind(:route) do |m, p, params|
+      route(m, p, params || {})
+    end
+    w.html = render_page
   end
-  w.html = render_page
 end

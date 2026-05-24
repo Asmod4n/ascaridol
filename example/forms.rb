@@ -1,13 +1,13 @@
-# Form validation patterns in Hypha.
+# Form validation patterns in Ascaridol.
 #
 # Build:
-#   conf.gem '<path-to-hypha-mrb>' do |hypha|
-#     hypha.hypha_main = File.expand_path('example/forms.rb', __dir__)
+#   conf.gem '<path-to-ascaridol-mrb>' do |ascaridol|
+#     ascaridol.ascaridol_main = File.expand_path('example/forms.rb', __dir__)
 #   end
 #   rake
 #
 # Run:
-#   mruby/build/host/bin/hypha
+#   mruby/build/host/bin/ascaridol
 #
 # Demonstrates:
 #   - Inline field validation (rb-post on input blur)
@@ -15,7 +15,7 @@
 #   - Form submit with full-form replace on success
 #   - Server-driven password strength meter
 #
-# Hypha's html_router handles `rb-trigger="blur"` so individual fields
+# Ascaridol's html_router handles `rb-trigger="blur"` so individual fields
 # can validate themselves without wiring custom JS.
 
 $users = ["alice", "bob"] # already-taken handles
@@ -136,7 +136,7 @@ end
 def render_page
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>forms</title>
-    #{Hypha.html_router(:route)}<style>#{CSS}</style></head>
+    #{Ascaridol.html_router(:route)}<style>#{CSS}</style></head>
     <body><h1>FORMS x VALIDATION</h1>
     #{render_card(render_form)}
     </body></html>
@@ -167,7 +167,9 @@ def route(method, path, params)
   end
 end
 
-Hypha.run(title: "forms x mruby", size: [600, 600]) do |w|
-  w.bind(:route) { |m, p, params| route(m, p, params) }
-  w.html = render_page
+def main
+  Ascaridol.run(title: "forms x mruby", size: [600, 600]) do |w|
+    w.bind(:route) { |m, p, params| route(m, p, params) }
+    w.html = render_page
+  end
 end

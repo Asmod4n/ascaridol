@@ -1,19 +1,19 @@
 # frozen_string_literal: true
 #
-# mruby-webview: Ruby-level helpers on top of the Hypha module.
+# mruby-webview: Ruby-level helpers on top of the Ascaridol module.
 #
-# Hypha itself (the C side) provides Hypha.run, Hypha.bind, Hypha.html=,
-# Hypha.dispatch, etc. This file adds:
+# Ascaridol itself (the C side) provides Ascaridol.run, Ascaridol.bind, Ascaridol.html=,
+# Ascaridol.dispatch, etc. This file adds:
 #
-#   - Hypha.html_router(name): a <script> string that wires
+#   - Ascaridol.html_router(name): a <script> string that wires
 #     rb-{get,post,put,patch,delete} attributes to a Ruby-bound function.
 #
-#   - A Ruby-level Hypha.bind wrapper that, in addition to registering the
+#   - A Ruby-level Ascaridol.bind wrapper that, in addition to registering the
 #     binding, injects a small JS shim so JavaScript callers see real Error
 #     objects when the Ruby block raises (rather than the {name, message,
 #     backtrace} object webview's native bind machinery resolves with).
 #
-# Both are convenience layers over the C API; Hypha works without them.
+# Both are convenience layers over the C API; Ascaridol works without them.
 CBOR.register_tag(50000) do
   encode Exception do |e|
     [e.class, e.message, e.backtrace]
@@ -34,14 +34,14 @@ CBOR.register_tag(50001) do
   end
 end
 
-module Hypha
+module Ascaridol
   class << self
     # Returns a <script> block that wires rb-{get,post,put,patch,delete}
     # attributes in the page to a Ruby-bound function. Drop it into <head>.
     #
-    #   Hypha.run do |h|
+    #   Ascaridol.run do |h|
     #     h.bind(:route) { |method, path, params| render_page(method, path, params) }
-    #     h.html = "<head>#{Hypha.html_router(:route)}</head>..."
+    #     h.html = "<head>#{Ascaridol.html_router(:route)}</head>..."
     #   end
     #
     # The bind name must be a plain ASCII JS identifier.
@@ -52,8 +52,8 @@ module Hypha
       ROUTER_TEMPLATE.render('route_fn' => name)
     end
 
-    # Wrap C-level Hypha.bind to also inject the JS error shim. Calling
-    # Hypha.bind from Ruby goes through here; bind name -> proc registration
+    # Wrap C-level Ascaridol.bind to also inject the JS error shim. Calling
+    # Ascaridol.bind from Ruby goes through here; bind name -> proc registration
     # is delegated to the C method (aliased to _native_bind below), and we
     # follow up with init() to install the shim that promotes resolved-with-
     # error-object rejections into real Error throws on the JS side.

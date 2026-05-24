@@ -69,4 +69,8 @@ compile_commands.json
 
 # NuGet packages directory (restored from packages.config)
 /packages/
-/tools/hypha/main_bytecode.h
+/tools/ascaridol/main_bytecode.h
+mruby-webview-notes
+mruby-webview-notes-lock
+foo.py
+foo.rb
