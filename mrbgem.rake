@@ -149,21 +149,20 @@ MRuby::Gem::Specification.new('ascaridol') do |spec|
     spec.linker.libraries << 'c++'
 
   else
-    pkg = ENV['ASCARIDOL_WEBVIEW_PKG']
-    pkg ||= %w[gtk4 webkitgtk-6.0].all?       { |p| system("pkg-config --exists #{p}") } ? 'gtk4 webkitgtk-6.0'      : nil
-    pkg ||= %w[gtk+-3.0 webkit2gtk-4.1].all?  { |p| system("pkg-config --exists #{p}") } ? 'gtk+-3.0 webkit2gtk-4.1' : nil
-    pkg ||= %w[gtk+-3.0 webkit2gtk-4.0].all?  { |p| system("pkg-config --exists #{p}") } ? 'gtk+-3.0 webkit2gtk-4.0' : nil
-
-    abort <<~MSG unless pkg
-      [ascaridol] no GTK + WebKitGTK development packages found via pkg-config.
-      Install one of:
-        - gtk4 + webkitgtk-6.0   (Debian/Ubuntu: libgtk-4-dev libwebkitgtk-6.0-dev)
-        - gtk+-3.0 + webkit2gtk-4.1   (libgtk-3-dev libwebkit2gtk-4.1-dev)
-        - gtk+-3.0 + webkit2gtk-4.0   (libgtk-3-dev libwebkit2gtk-4.0-dev)
-      Or set ASCARIDOL_WEBVIEW_PKG to a custom pkg-config package list.
-    MSG
-
-    spec.search_package(pkg)
+    if (pkg = ENV['ASCARIDOL_WEBVIEW_PKG'])
+      spec.search_package(pkg)
+    elsif !spec.search_package('gtk4 webkitgtk-6.0') &&
+          !spec.search_package('gtk+-3.0 webkit2gtk-4.1') &&
+          !spec.search_package('gtk+-3.0 webkit2gtk-4.0')
+      abort <<~MSG
+        [ascaridol] no GTK + WebKitGTK development packages found via pkg-config.
+        Install one of:
+          - gtk4 + webkitgtk-6.0   (Debian/Ubuntu: libgtk-4-dev libwebkitgtk-6.0-dev)
+          - gtk+-3.0 + webkit2gtk-4.1   (libgtk-3-dev libwebkit2gtk-4.1-dev)
+          - gtk+-3.0 + webkit2gtk-4.0   (libgtk-3-dev libwebkit2gtk-4.0-dev)
+        Or set ASCARIDOL_WEBVIEW_PKG to a custom pkg-config package list.
+      MSG
+    end
   end
 
   if is_windows
