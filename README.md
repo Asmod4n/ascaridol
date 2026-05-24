@@ -51,7 +51,7 @@ Add Ascaridol to your `build_config.rb` and point `ascaridol_main` at your app:
 
 ```ruby
 conf.gem github: 'Asmod4n/ascaridol' do |ascaridol|
-  ascaridol.ascaridol_main = 'app/main.rb'
+  ascaridol.rbfiles << '../app/main.rb'
 end
 ```
 
@@ -361,10 +361,6 @@ ascaridol-mrb/
 └── mrbgem.rake
 ```
 
-`tools/ascaridol/main.c` is regenerated on every build from whatever script
-`ascaridol_main` points at. It's tracked in git so a fresh clone can build;
-don't commit local changes to it (`git checkout tools/ascaridol/main.c` to
-discard).
 
 ## License
 

@@ -44,6 +44,7 @@
 #include <mruby/error.h>
 #include <mruby/hash.h>
 #include <mruby/numeric.h>
+#include <mruby/chrono.h>
 #include <mruby/presym.h>
 #include <mruby/proc.h>
 #include <mruby/string.h>
@@ -54,6 +55,7 @@
 #include <mruby/io.h>
 
 #include <mruby/cpp_helpers.hpp>
+#include <mruby/num_helpers.hpp>
 #include <mruby/fast_json.h>
 
 #include <webview/webview.h>
@@ -439,6 +441,31 @@ fds_hash(mrb_state* mrb)
     return h;
 }
 
+/* ---- Persistent GC root for live Ascaridol::Timer objects --------------
+ *
+ * The OS owns the timer source (g_timeout, CFRunLoopTimer, SetTimer) which
+ * holds a raw pointer to our ud struct. The ud lives inside the Ruby
+ * Timer object's CDATA. If nothing in Ruby references the Timer, GC
+ * collects it, the destructor frees ud, and the next OS-level callback
+ * uses freed memory.
+ *
+ * timer_map pins every live Timer until cancel / user block returns
+ * stop. Key is the native platform timer id (cptr for pointer-shaped
+ * ids, uint for guint). Callbacks fetch the Timer back out by the id
+ * they already received from the OS. */
+static mrb_value
+timer_map(mrb_state* mrb)
+{
+    mrb_value asc = mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(Ascaridol)));
+    mrb_value h = mrb_iv_get(mrb, asc, MRB_SYM(_timer_map));
+    if (!mrb_hash_p(h)) {
+        h = mrb_hash_new(mrb);
+        mrb_iv_set(mrb, asc, MRB_SYM(_timer_map), h);
+    }
+    return h;
+}
+
+
 enum ascaridol_fd_cond {
     ASCARIDOL_FD_READ  = 1,
     ASCARIDOL_FD_WRITE = 4,
@@ -604,6 +631,132 @@ ascaridol_remove_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
     ud->id = 0;
     mrb_hash_delete_key(mrb, fh, fd_obj);
 }
+
+/* ---- GTK timers --------------------------------------------------------- */
+
+struct mrb_ascaridol_timer_ud {
+    mrb_state* mrb;
+    mrb_value  blk;
+    guint      id       = 0;
+    guint      interval = 0;
+
+    ~mrb_ascaridol_timer_ud() {
+        if (id) { g_source_remove(id); id = 0; }
+    }
+};
+
+MRB_CPP_DEFINE_TYPE(mrb_ascaridol_timer_ud, Ascaridol_Timer);
+
+static gboolean
+on_timer_fire(gpointer user_data)
+{
+    auto* ud = static_cast<mrb_ascaridol_timer_ud*>(user_data);
+    mrb_state* mrb = ud->mrb;
+
+    /* Pin the user block across the yield. timer_map keyed by ud->id is
+     * the persistent GC root for the owning Ruby Timer; we keep it across
+     * the yield, then move/remove on stop or different-interval rearm. */
+    mrb_value old_key = mrb_convert_number(mrb, ud->id);
+    mrb_value blk     = ud->blk;
+    mrb_gc_register(mrb, blk);
+
+    mrb_int ai = mrb_gc_arena_save(mrb);
+
+    mrb_value ret = mrb_yield_argv(mrb, blk, 0, nullptr);
+
+    guint next_ms = 0;
+    bool  rearm   = false;
+    if (mrb_true_p(ret)) {
+        next_ms = ud->interval; rearm = true;
+    } else if (!mrb_nil_p(ret) && !mrb_false_p(ret)) {
+        uint32_t n_ms;
+        mrb_chrono_convert(mrb, ret, MRB_CHRONO_OUT_UINT32,
+                           MRB_CHRONO_DUR_MILLISECONDS,
+                           MRB_CHRONO_CEIL, &n_ms, sizeof n_ms);
+        { next_ms = (guint)n_ms; rearm = true; }
+    }
+
+    if (rearm && next_ms == ud->interval) {
+        mrb_gc_arena_restore(mrb, ai);
+        mrb_gc_unregister(mrb, blk);
+        return G_SOURCE_CONTINUE;
+    }
+
+    mrb_value timer = mrb_hash_fetch(mrb, timer_map(mrb), old_key, mrb_undef_value());
+    mrb_hash_delete_key(mrb, timer_map(mrb), old_key);
+    ud->id = 0;
+    mrb_gc_arena_restore(mrb, ai);
+    if (rearm) {
+        ud->interval = next_ms;
+        ud->id = g_timeout_add(next_ms, on_timer_fire, ud);
+        if (!mrb_undef_p(timer)) {
+            mrb_hash_set(mrb, timer_map(mrb),
+                mrb_convert_number(mrb, ud->id), timer);
+        }
+    }
+    mrb_gc_unregister(mrb, blk);
+    return G_SOURCE_REMOVE;
+}
+
+static mrb_value
+ascaridol_timer_ud_init(mrb_state* mrb, mrb_value self)
+{
+    mrb_value blk; mrb_value secs;
+    mrb_get_args(mrb, "oo", &secs, &blk);
+    mrb_iv_set(mrb, self, MRB_SYM(blk), blk);
+    mrb_cpp_new<mrb_ascaridol_timer_ud>(mrb, self);
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, self);
+    ud->mrb = mrb; ud->blk = blk;
+    uint32_t ms;
+    mrb_chrono_convert(mrb, secs, MRB_CHRONO_OUT_UINT32,
+                       MRB_CHRONO_DUR_MILLISECONDS,
+                       MRB_CHRONO_CEIL, &ms, sizeof ms);
+    ud->interval = (guint)ms;
+    ud->id = g_timeout_add((guint)ms, on_timer_fire, ud);
+    mrb_hash_set(mrb, timer_map(mrb), mrb_convert_number(mrb, ud->id), self);
+    return self;
+}
+
+static mrb_value
+mrb_ascaridol_timer_rearm(mrb_state* mrb, mrb_value self)
+{
+    mrb_value secs; mrb_get_args(mrb, "o", &secs);
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, self);
+    if (ud->id) {
+        mrb_hash_delete_key(mrb, timer_map(mrb), mrb_convert_number(mrb, ud->id));
+        g_source_remove(ud->id);
+        ud->id = 0;
+    }
+    uint32_t ms;
+    mrb_chrono_convert(mrb, secs, MRB_CHRONO_OUT_UINT32,
+                       MRB_CHRONO_DUR_MILLISECONDS,
+                       MRB_CHRONO_CEIL, &ms, sizeof ms);
+    {
+        ud->interval = (guint)ms;
+        ud->id = g_timeout_add((guint)ms, on_timer_fire, ud);
+        mrb_hash_set(mrb, timer_map(mrb), mrb_convert_number(mrb, ud->id), self);
+    }
+    return self;
+}
+
+static mrb_value
+mrb_ascaridol_timer_cancel(mrb_state* mrb, mrb_value self)
+{
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, self);
+    if (ud->id) {
+        mrb_hash_delete_key(mrb, timer_map(mrb), mrb_convert_number(mrb, ud->id));
+        g_source_remove(ud->id);
+        ud->id = 0;
+    }
+    return mrb_nil_value();
+}
+
+static mrb_value
+mrb_ascaridol_timer_active_p(mrb_state* mrb, mrb_value self)
+{
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, self);
+    return mrb_bool_value(ud->id != 0);
+}
 #endif /* WEBVIEW_GTK */
 
 #ifdef WEBVIEW_COCOA
@@ -758,6 +911,138 @@ ascaridol_remove_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
         mrb_hash_delete_key(mrb, fh, fd_obj);  /* dtor handles teardown */
     }
 }
+
+/* ---- Cocoa timers ------------------------------------------------------- */
+
+struct mrb_ascaridol_timer_ud {
+    mrb_state*        mrb;
+    mrb_value         blk;
+    CFRunLoopTimerRef timer    = nullptr;
+    CFTimeInterval    interval = 0.0;
+
+    ~mrb_ascaridol_timer_ud() {
+        if (timer) {
+            CFRunLoopRemoveTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
+            CFRunLoopTimerInvalidate(timer); CFRelease(timer); timer = nullptr;
+        }
+    }
+};
+
+MRB_CPP_DEFINE_TYPE(mrb_ascaridol_timer_ud, Ascaridol_Timer);
+
+static void ascaridol_arm_cf_timer(mrb_ascaridol_timer_ud*, double, mrb_value);
+
+static void
+on_cf_timer_fire(CFRunLoopTimerRef /*ref*/, void* info)
+{
+    auto* ud = static_cast<mrb_ascaridol_timer_ud*>(info);
+    mrb_state* mrb = ud->mrb;
+
+    /* Pin the owning Ruby Timer across the yield. timer_map keyed by the
+     * current CFRunLoopTimerRef is its persistent GC root; we save it
+     * out, then remove the entry under the soon-invalidated key. If the
+     * user rearms, ascaridol_arm_cf_timer re-adds it under the new ref. */
+    mrb_value key   = mrb_convert_number(mrb, (uintptr_t)ud->timer);
+    mrb_value timer = mrb_hash_fetch(mrb, timer_map(mrb), key, mrb_undef_value());
+    if (!mrb_undef_p(timer)) mrb_gc_register(mrb, timer);
+    mrb_hash_delete_key(mrb, timer_map(mrb), key);
+
+    mrb_value blk = ud->blk;
+    mrb_gc_register(mrb, blk);
+
+    mrb_int ai = mrb_gc_arena_save(mrb);
+
+    CFRunLoopRemoveTimer(CFRunLoopGetMain(), ud->timer, kCFRunLoopCommonModes);
+    CFRunLoopTimerInvalidate(ud->timer); CFRelease(ud->timer); ud->timer = nullptr;
+
+    mrb_value ret = mrb_yield_argv(mrb, blk, 0, nullptr);
+
+    double next_ms = -1.0;
+    if (mrb_true_p(ret)) {
+        next_ms = ud->interval * 1000.0;
+    } else if (!mrb_nil_p(ret) && !mrb_false_p(ret)) {
+        double n;
+        mrb_chrono_convert(mrb, ret, MRB_CHRONO_OUT_DOUBLE,
+                           MRB_CHRONO_DUR_MILLISECONDS,
+                           MRB_CHRONO_TRUNC, &n, sizeof n);
+        if (n >= 0.0) next_ms = n;
+    }
+    if (next_ms >= 0.0 && !mrb_undef_p(timer)) {
+        ascaridol_arm_cf_timer(ud, next_ms, timer);
+    }
+
+    mrb_gc_arena_restore(mrb, ai);
+    mrb_gc_unregister(mrb, blk);
+    if (!mrb_undef_p(timer)) mrb_gc_unregister(mrb, timer);
+}
+
+static void
+ascaridol_arm_cf_timer(mrb_ascaridol_timer_ud* ud, double ms, mrb_value self)
+{
+    CFAbsoluteTime fire = CFAbsoluteTimeGetCurrent() + ms / 1000.0;
+    CFRunLoopTimerContext ctx = { 0, ud, nullptr, nullptr, nullptr };
+    ud->timer = CFRunLoopTimerCreate(kCFAllocatorDefault,
+        fire, 0, 0, 0, on_cf_timer_fire, &ctx);
+    ud->interval = ms / 1000.0;
+    mrb_hash_set(ud->mrb, timer_map(ud->mrb),
+        mrb_convert_number(ud->mrb, (uintptr_t)ud->timer), self);
+    CFRunLoopAddTimer(CFRunLoopGetMain(), ud->timer, kCFRunLoopCommonModes);
+}
+
+static mrb_value
+ascaridol_timer_ud_init(mrb_state* mrb, mrb_value self)
+{
+    mrb_value blk; mrb_value secs;
+    mrb_get_args(mrb, "oo", &secs, &blk);
+    mrb_iv_set(mrb, self, MRB_SYM(blk), blk);
+    mrb_cpp_new<mrb_ascaridol_timer_ud>(mrb, self);
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, self);
+    ud->mrb = mrb; ud->blk = blk;
+    double ms_d;
+    mrb_chrono_convert(mrb, secs, MRB_CHRONO_OUT_DOUBLE,
+                       MRB_CHRONO_DUR_MILLISECONDS,
+                       MRB_CHRONO_TRUNC, &ms_d, sizeof ms_d);
+    if (ms_d < 0.0) mrb_raise(mrb, E_ARGUMENT_ERROR, "timer interval must be >= 0");
+    ascaridol_arm_cf_timer(ud, ms_d, self);
+    return self;
+}
+
+static mrb_value
+mrb_ascaridol_timer_rearm(mrb_state* mrb, mrb_value self)
+{
+    mrb_value secs; mrb_get_args(mrb, "o", &secs);
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, self);
+    if (ud->timer) {
+        mrb_hash_delete_key(mrb, timer_map(mrb), mrb_convert_number(mrb, (uintptr_t)ud->timer));
+        CFRunLoopRemoveTimer(CFRunLoopGetMain(), ud->timer, kCFRunLoopCommonModes);
+        CFRunLoopTimerInvalidate(ud->timer); CFRelease(ud->timer); ud->timer = nullptr;
+    }
+    double ms_d;
+    mrb_chrono_convert(mrb, secs, MRB_CHRONO_OUT_DOUBLE,
+                       MRB_CHRONO_DUR_MILLISECONDS,
+                       MRB_CHRONO_TRUNC, &ms_d, sizeof ms_d);
+    if (ms_d >= 0.0) ascaridol_arm_cf_timer(ud, ms_d, self);
+    return self;
+}
+
+static mrb_value
+mrb_ascaridol_timer_cancel(mrb_state* mrb, mrb_value self)
+{
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, self);
+    if (ud->timer) {
+        mrb_hash_delete_key(mrb, timer_map(mrb), mrb_convert_number(mrb, (uintptr_t)ud->timer));
+        CFRunLoopRemoveTimer(CFRunLoopGetMain(), ud->timer, kCFRunLoopCommonModes);
+        CFRunLoopTimerInvalidate(ud->timer); CFRelease(ud->timer); ud->timer = nullptr;
+    }
+    return mrb_nil_value();
+}
+
+static mrb_value
+mrb_ascaridol_timer_active_p(mrb_state* mrb, mrb_value self)
+{
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, self);
+    return mrb_bool_value(ud->timer != nullptr);
+}
 #endif /* WEBVIEW_COCOA */
 
 #ifdef WEBVIEW_EDGE
@@ -808,9 +1093,19 @@ sockmap_hash(mrb_state* mrb)
     return h;
 }
 
+
+static UINT_PTR g_next_timer_id = 1;
+static void ascaridol_on_win32_timer(mrb_state*, UINT_PTR);
+
 static LRESULT CALLBACK
 ascaridol_fd_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    if (msg == WM_TIMER) {
+        auto* ctx2 = reinterpret_cast<mrb_ascaridol_wnd_ctx*>(
+            GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (ctx2 && ctx2->mrb) ascaridol_on_win32_timer(ctx2->mrb, (UINT_PTR)wParam);
+        return 0;
+    }
     if (msg != MRB_ASCARIDOL_WM_FD) {
         return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
@@ -1020,7 +1315,150 @@ ascaridol_remove_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
     }
     mrb_hash_delete_key(mrb, fh, fd_obj);
 }
+
+/* ---- Win32 timers ------------------------------------------------------- */
+
+struct mrb_ascaridol_timer_ud {
+    mrb_state* mrb;
+    mrb_value  blk;
+    HWND       hwnd     = nullptr;
+    UINT_PTR   timer_id = 0;
+    UINT       interval = 0;
+
+    ~mrb_ascaridol_timer_ud() {
+        if (timer_id && hwnd) { KillTimer(hwnd, timer_id); timer_id = 0; }
+    }
+};
+
+MRB_CPP_DEFINE_TYPE(mrb_ascaridol_timer_ud, Ascaridol_Timer);
+
+static void
+ascaridol_on_win32_timer(mrb_state* mrb, UINT_PTR timer_id)
+{
+    mrb_value key    = mrb_convert_number(mrb, timer_id);
+    mrb_value tm_obj = mrb_hash_fetch(mrb, timer_map(mrb), key, mrb_undef_value());
+    if (mrb_undef_p(tm_obj)) return;
+
+    /* Pin tm_obj across the yield. timer_map was the only persistent GC
+     * root for the Ascaridol::Timer Ruby object and we're about to remove
+     * the entry. Without this pin, the user's block can trigger a GC that
+     * collects tm_obj, runs ~mrb_ascaridol_timer_ud(), and leaves `ud`
+     * dangling for the rest of this function. */
+    mrb_gc_register(mrb, tm_obj);
+
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, tm_obj);
+
+    KillTimer(ud->hwnd, ud->timer_id);
+    ud->timer_id = 0;
+    mrb_hash_delete_key(mrb, timer_map(mrb), key);
+
+    mrb_int ai = mrb_gc_arena_save(mrb);
+    mrb_value ret = mrb_yield_argv(mrb, ud->blk, 0, nullptr);
+
+    UINT next_ms = 0; bool rearm = false;
+    if (mrb_true_p(ret)) {
+        next_ms = ud->interval; rearm = true;
+    } else if (!mrb_nil_p(ret) && !mrb_false_p(ret)) {
+        uint32_t n_ms;
+        mrb_chrono_convert(mrb, ret, MRB_CHRONO_OUT_UINT32,
+                           MRB_CHRONO_DUR_MILLISECONDS,
+                           MRB_CHRONO_CEIL, &n_ms, sizeof n_ms);
+        { next_ms = (UINT)n_ms; rearm = true; }
+    }
+
+    if (rearm) {
+        ud->interval = next_ms; ud->timer_id = g_next_timer_id++;
+        mrb_hash_set(mrb, timer_map(mrb),
+            mrb_convert_number(mrb, ud->timer_id), tm_obj);
+        SetTimer(ud->hwnd, ud->timer_id, next_ms, nullptr);
+    }
+    mrb_gc_arena_restore(mrb, ai);
+    mrb_gc_unregister(mrb, tm_obj);
+}
+
+static mrb_value
+ascaridol_timer_ud_init(mrb_state* mrb, mrb_value self)
+{
+    mrb_value blk; mrb_value secs;
+    mrb_get_args(mrb, "oo", &secs, &blk);
+    mrb_iv_set(mrb, self, MRB_SYM(blk), blk);
+    mrb_cpp_new<mrb_ascaridol_timer_ud>(mrb, self);
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, self);
+    ud->mrb = mrb; ud->blk = blk;
+    ud->hwnd = get_or_create_ascaridol_wnd(mrb);
+    uint32_t ms;
+    mrb_chrono_convert(mrb, secs, MRB_CHRONO_OUT_UINT32,
+                       MRB_CHRONO_DUR_MILLISECONDS,
+                       MRB_CHRONO_CEIL, &ms, sizeof ms);
+    ud->interval = (UINT)ms; ud->timer_id = g_next_timer_id++;
+    mrb_hash_set(mrb, timer_map(mrb),
+        mrb_convert_number(mrb, ud->timer_id), self);
+    SetTimer(ud->hwnd, ud->timer_id, (UINT)ms, nullptr);
+    return self;
+}
+
+static mrb_value
+mrb_ascaridol_timer_rearm(mrb_state* mrb, mrb_value self)
+{
+    mrb_value secs; mrb_get_args(mrb, "o", &secs);
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, self);
+    if (ud->timer_id) {
+        KillTimer(ud->hwnd, ud->timer_id);
+        mrb_hash_delete_key(mrb, timer_map(mrb),
+            mrb_convert_number(mrb, ud->timer_id));
+        ud->timer_id = 0;
+    }
+    uint32_t ms;
+    mrb_chrono_convert(mrb, secs, MRB_CHRONO_OUT_UINT32,
+                       MRB_CHRONO_DUR_MILLISECONDS,
+                       MRB_CHRONO_CEIL, &ms, sizeof ms);
+    {
+        ud->interval = (UINT)ms; ud->timer_id = g_next_timer_id++;
+        mrb_hash_set(mrb, timer_map(mrb),
+            mrb_convert_number(mrb, ud->timer_id), self);
+        SetTimer(ud->hwnd, ud->timer_id, (UINT)ms, nullptr);
+    }
+    return self;
+}
+
+static mrb_value
+mrb_ascaridol_timer_cancel(mrb_state* mrb, mrb_value self)
+{
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, self);
+    if (ud->timer_id) {
+        KillTimer(ud->hwnd, ud->timer_id);
+        mrb_hash_delete_key(mrb, timer_map(mrb),
+            mrb_convert_number(mrb, ud->timer_id));
+        ud->timer_id = 0;
+    }
+    return mrb_nil_value();
+}
+
+static mrb_value
+mrb_ascaridol_timer_active_p(mrb_state* mrb, mrb_value self)
+{
+    auto* ud = mrb_cpp_get<mrb_ascaridol_timer_ud>(mrb, self);
+    return mrb_bool_value(ud->timer_id != 0);
+}
 #endif /* WEBVIEW_EDGE */
+
+
+/* ========================================================================= */
+/* Ascaridol.add_timer                                                       */
+/* ========================================================================= */
+
+static mrb_value
+mrb_ascaridol_add_timer(mrb_state* mrb, mrb_value /*self*/)
+{
+    ascaridol_require_main_state(mrb, "Ascaridol.add_timer");
+    mrb_value secs;
+    mrb_value blk = mrb_undef_value();
+    mrb_get_args(mrb, "o&!", &secs, &blk);
+    struct RClass* asc       = mrb_module_get_id(mrb, MRB_SYM(Ascaridol));
+    struct RClass* timer_cls = mrb_class_get_under_id(mrb, asc, MRB_SYM(Timer));
+    mrb_value argv[] = { secs, blk };
+    return mrb_obj_new(mrb, timer_cls, 2, argv);
+}
 
 /* ASCARIDOL_TAURI_MENU_V1 */
 /* ASCARIDOL_MENU_COMPILE_FIXUP_V1 */
@@ -1893,6 +2331,7 @@ ascaridol_reset_for_run(mrb_state* mrb)
     mrb_iv_set(mrb, asc_mod, MRB_SYM(bindings),        mrb_hash_new(mrb));
     mrb_iv_set(mrb, asc_mod, MRB_SYM(async_bindings),  mrb_hash_new(mrb));
     mrb_iv_set(mrb, asc_mod, MRB_SYM(fds_procs),       mrb_hash_new(mrb));
+    mrb_iv_set(mrb, asc_mod, MRB_SYM(_timer_map),      mrb_hash_new(mrb));
     g_ready_fired = false;
 
     /* Menu state — webview destruction invalidated the widgets; reset
@@ -2014,6 +2453,25 @@ mrb_ascaridol_run(mrb_state* mrb, mrb_value self)
      * Ascaridol.enable_html_menu.) */
     attach_menu_and_icon(wv);
 
+    /* Install the DOMContentLoaded listener and bind _ascaridol_ready
+     * BEFORE yielding the setup block so that html= / url= called
+     * inside the block see them on the first navigation. */
+    ascaridol_check_result(mrb, wv->init(
+        "(function(){"
+        "  document.addEventListener('DOMContentLoaded',function(){"
+        "    if(typeof window._ascaridol_ready==='function'){"
+        "      window._ascaridol_ready().catch(function(){});"
+        "    }"
+        "  });"
+        "})();"
+    ));
+
+    if (g_ready_hook_set) {
+        mrb_value name  = mrb_symbol_value(MRB_SYM(_ascaridol_ready));
+        mrb_value asc = mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(Ascaridol)));
+        mrb_funcall_with_block(mrb, asc, MRB_SYM(bind), 1, &name, g_ready_hook);
+    }
+
     mrb_value ascaridol_module = mrb_obj_value(mrb_class_ptr(self));
     struct ctx_2 { mrb_value blk; mrb_value arg; };
     ctx_2 c2{ blk, ascaridol_module };
@@ -2038,22 +2496,6 @@ mrb_ascaridol_run(mrb_state* mrb, mrb_value self)
                 "Ascaridol.run setup block raised a non-exception value");
         }
         return mrb_nil_value();
-    }
-
-    ascaridol_check_result(mrb, wv->init(
-        "(function(){"
-        "  document.addEventListener('DOMContentLoaded',function(){"
-        "    if(typeof window._ascaridol_ready==='function'){"
-        "      window._ascaridol_ready().catch(function(){});"
-        "    }"
-        "  });"
-        "})();"
-    ));
-
-    if (g_ready_hook_set) {
-        mrb_value name  = mrb_symbol_value(MRB_SYM(_ascaridol_ready));
-        mrb_value asc = mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(Ascaridol)));
-        mrb_funcall_with_block(mrb, asc, MRB_SYM(bind), 1, &name, g_ready_hook);
     }
 
     using run_result_t = decltype(wv->run());
@@ -2291,6 +2733,24 @@ ascaridol_install_runtime(mrb_state* mrb)
         mrb_ascaridol_bindings, MRB_ARGS_NONE());
     mrb_define_class_method_id(mrb, asc, MRB_SYM(handle),
         mrb_ascaridol_handle, MRB_ARGS_OPT(1));
+
+
+    /* Ascaridol::Timer */
+    {
+        struct RClass* timer_cls = mrb_define_class_under_id(mrb, asc,
+            MRB_SYM(Timer), mrb->object_class);
+        MRB_SET_INSTANCE_TT(timer_cls, MRB_TT_CDATA);
+        mrb_define_method_id(mrb, timer_cls, MRB_SYM(initialize),
+            ascaridol_timer_ud_init, MRB_ARGS_REQ(2));
+        mrb_define_method_id(mrb, timer_cls, MRB_SYM(rearm),
+            mrb_ascaridol_timer_rearm, MRB_ARGS_REQ(1));
+        mrb_define_method_id(mrb, timer_cls, MRB_SYM(cancel),
+            mrb_ascaridol_timer_cancel, MRB_ARGS_NONE());
+        mrb_define_method_id(mrb, timer_cls, MRB_SYM(active_q),
+            mrb_ascaridol_timer_active_p, MRB_ARGS_NONE());
+    }
+    mrb_define_class_method_id(mrb, asc, MRB_SYM(add_timer),
+        mrb_ascaridol_add_timer, MRB_ARGS_REQ(1) | MRB_ARGS_BLOCK());
 
     /* Ruby-driven native menu. */
     mrb_define_class_method_id(mrb, asc, MRB_SYM_E(menu),
