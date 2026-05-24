@@ -1,87 +1,69 @@
-# Ascaridol HTML-menu example.
+# Ascaridol Ruby-driven native menu example.
 #
-# Demonstrates `Ascaridol.enable_html_menu`: write a hidden `<menu>` tree,
-# Ascaridol scrapes it into a real native menu bar (Win32, Cocoa, or GTK).
-# Item actions are just JS in `data-action`; accelerators go in `data-accel`
-# in the platform-native syntax that `Ascaridol.platform` tells you to use.
+# Demonstrates `Ascaridol.menu =` — array spec, Tauri-style. Items reference
+# Ruby bindings by symbol; native activation invokes the proc directly.
+# No HTML scraping, no JS round-trip.
+#
+# Spec shape:
+#   [ [group_label, [item, item, ...]], ... ]
+# Items:
+#   [label, :bind_sym]                  basic
+#   [label, :bind_sym, "CmdOrCtrl+S"]   with accelerator
+#   [:separator]                        separator line
+#
+# `CmdOrCtrl` in accel strings becomes Cmd on macOS, Ctrl elsewhere.
 
 def main
-  # Format an accelerator string in the current platform's native syntax.
-  accel = ->(key) {
-    case Ascaridol.platform
-    when :macos   then "Cmd+#{key}"               # NSEventModifierFlag tokens
-    when :windows then "Ctrl+#{key}"              # vkey + Ctrl/Shift/Alt
-    else               "<Control>#{key.downcase}" # gtk_accelerator_parse syntax
-    end
-  }
+  Ascaridol.run(title: 'Menu demo', size: [800, 600]) do |a|
+    a.bind(:open_file)   { puts "[ruby] open file";    nil }
+    a.bind(:save_file)   { puts "[ruby] save file";    nil }
+    a.bind(:save_as)     { puts "[ruby] save as";      nil }
+    a.bind(:greet)       { puts "[ruby] hello";        nil }
+    a.bind(:grow_text)   { Ascaridol.eval "document.body.style.fontSize = (parseInt(getComputedStyle(document.body).fontSize) + 2) + 'px'"; nil }
+    a.bind(:shrink_text) { Ascaridol.eval "document.body.style.fontSize = Math.max(8, parseInt(getComputedStyle(document.body).fontSize) - 2) + 'px'"; nil }
+    a.bind(:about)       { Ascaridol.eval "alert('Ascaridol menu demo\\nPlatform: #{Ascaridol.platform}')"; nil }
+    a.bind(:quit)        { Ascaridol.terminate; nil }
 
-  Ascaridol.run(title: 'HTML menu demo', size: [800, 600]) do |a|
-    # Bindings the menu items will call via data-action.
-    a.bind(:say)  { |msg| puts "[ruby] #{msg}"; nil }
-    a.bind(:quit) { Ascaridol.terminate; nil }
-
-    # Wire the scraper + native installer. Must be called before the HTML
-    # is set so the init script is registered for first page load.
-    a.enable_html_menu
+    Ascaridol.menu = [
+      ["File", [
+        ["Open\u2026", :open_file, "CmdOrCtrl+O"],
+        ["Save",       :save_file, "CmdOrCtrl+S"],
+        ["Save As\u2026", :save_as, "CmdOrCtrl+Shift+S"],
+        [:separator],
+        ["Quit",       :quit,      "CmdOrCtrl+Q"],
+      ]],
+      ["Edit", [
+        ["Greet",        :greet],
+        [:separator],
+        ["Bigger text",  :grow_text,   "CmdOrCtrl+Plus"],
+        ["Smaller text", :shrink_text, "CmdOrCtrl+Minus"],
+      ]],
+      ["Help", [
+        ["About", :about],
+      ]],
+    ]
 
     a.html = <<~HTML
       <!doctype html>
       <html>
         <head>
           <meta charset="utf-8">
-          <title>HTML menu demo</title>
+          <title>Menu demo</title>
           <style>
-            /* `only light` forces light scheme even when the OS / WebView2
-               is in dark mode — without this WebView2 inverts default
-               text/background to dark and our unstyled body is unreadable. */
             :root { color-scheme: only light; }
             html, body { background: #fff; color: #111; }
             body { font: 16px/1.4 system-ui, sans-serif; margin: 2em; }
-            kbd { background: #eee; border: 1px solid #ccc; border-radius: 3px;
-                  padding: 0 4px; font-family: monospace; color: #111; }
+            kbd  { background: #eee; border: 1px solid #ccc; border-radius: 3px;
+                   padding: 0 4px; font-family: monospace; color: #111; }
             code { color: #111; }
           </style>
         </head>
         <body>
-          <!-- Native menu spec. The id is what the scraper looks for; the
-               hidden attribute keeps it out of the rendered page. Each
-               <menu label="..."> is a top-level group; each <li> is an item.
-               data-action is JS (can call Ruby bindings or anything else).
-               data-accel uses the current platform's accelerator syntax. -->
-          <menu id="ascaridol-menu" hidden>
-            <menu label="File">
-              <li label="Open\u2026"
-                  data-action="alert('Open dialog goes here.')"
-                  data-accel="#{accel.('O')}"></li>
-              <li label="Save"
-                  data-action="say('save clicked')"
-                  data-accel="#{accel.('S')}"></li>
-              <li label="Quit"
-                  data-action="quit()"
-                  data-accel="#{accel.('Q')}"></li>
-            </menu>
-
-            <menu label="Edit">
-              <li label="Greet"
-                  data-action="say('hello from the menu')"></li>
-              <li label="Bigger text"
-                  data-action="document.body.style.fontSize = (parseInt(getComputedStyle(document.body).fontSize) + 2) + 'px'"
-                  data-accel="#{accel.('plus')}"></li>
-              <li label="Smaller text"
-                  data-action="document.body.style.fontSize = Math.max(8, parseInt(getComputedStyle(document.body).fontSize) - 2) + 'px'"
-                  data-accel="#{accel.('minus')}"></li>
-            </menu>
-
-            <menu label="Help">
-              <li label="About"
-                  data-action="alert('Ascaridol HTML menu demo\\nPlatform: #{Ascaridol.platform}')"></li>
-            </menu>
-          </menu>
-
-          <h1>HTML-driven native menu</h1>
-          <p>The menu bar at the top is real native chrome — built from the
-            hidden <code>&lt;menu id="ascaridol-menu"&gt;</code> in this page.</p>
-          <p>Try <kbd>#{accel.('Q')}</kbd>, or click around.</p>
+          <h1>Ruby-driven native menu</h1>
+          <p>The menu bar above is built from a Ruby array, not scraped from HTML.
+            Items map to <code>Ascaridol.bind</code> registrations by symbol;
+            activation invokes the proc directly — no JS round-trip.</p>
+          <p>Try <kbd>Quit</kbd>, or click around.</p>
           <p>Platform: <code>#{Ascaridol.platform}</code></p>
         </body>
       </html>

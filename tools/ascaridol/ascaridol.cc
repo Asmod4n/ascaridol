@@ -1022,74 +1022,121 @@ ascaridol_remove_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
 }
 #endif /* WEBVIEW_EDGE */
 
+/* ASCARIDOL_TAURI_MENU_V1 */
+/* ASCARIDOL_MENU_COMPILE_FIXUP_V1 */
+/* Forward declaration — defined in the lifecycle section further down. */
+static webview::webview* ascaridol_require_running_local(mrb_state* mrb);
+
 /* ========================================================================= */
-/* HTML-driven native menu                                                   */
+/* Ruby-driven native menu                                                   */
 /*                                                                           */
-/* Ascaridol.enable_html_menu injects a bootstrap JS scraper as a webview    */
-/* init script and registers a hidden binding __ascaridol_install_menu       */
-/* that takes the scraped spec and builds the native menu for the current    */
-/* backend. Items dispatch back to JS via window.__ascaridol_menu_trigger,   */
-/* which looks up the originating <li> by id and runs its data-action        */
-/* attribute as JS — so end users only write HTML, never any plumbing JS.    */
+/* Ascaridol.menu = [[group_label, [item, ...]], ...] builds a real native  */
+/* menu bar for the current backend. Items reference Ruby bindings by sym;  */
+/* native activation invokes the proc directly on main — no JS hop.         */
+/*                                                                           */
+/*   Item shapes:                                                            */
+/*     [label, :bind_sym]                  basic                            */
+/*     [label, :bind_sym, "CmdOrCtrl+S"]   with accelerator                 */
+/*     [:separator]                        separator line                   */
+/*                                                                           */
+/* Accelerator "CmdOrCtrl" translates to Cmd on macOS, Ctrl elsewhere.      */
 /* ========================================================================= */
 
-/* Spec shape (after JSON parse):                                            */
-/*   [ [group_label, [ [item_label, dom_id, accel_string], ... ] ], ... ]    */
+static std::string
+ascaridol_translate_accel(const char* s)
+{
+    if (!s || !*s) return {};
+    std::string out(s);
+#if defined(WEBVIEW_COCOA)
+    const char* repl = "Cmd";
+#else
+    const char* repl = "Ctrl";
+#endif
+    size_t pos = 0;
+    while ((pos = out.find("CmdOrCtrl", pos)) != std::string::npos) {
+        out.replace(pos, 9, repl);
+        pos += strlen(repl);
+    }
+    return out;
+}
 
-static const char ASCARIDOL_MENU_BOOTSTRAP_JS[] = R"JS(
-(function () {
-  if (window.__ascaridol_menu_installed) return;
-  window.__ascaridol_menu_installed = true;
+struct ascaridol_menu_trigger_ctx { mrb_value proc; };
 
-  function scrape(root) {
-    return Array.from(root.children)
-      .filter(function (g) { return g.tagName === 'MENU'; })
-      .map(function (g) {
-        return [
-          g.getAttribute('label') || '',
-          Array.from(g.children)
-            .filter(function (i) { return i.tagName === 'LI'; })
-            .map(function (i) {
-              var id = i.id || ('ascaridol-menu-item-' +
-                                Math.random().toString(36).slice(2));
-              i.id = id;
-              return [
-                i.getAttribute('label') || i.textContent.trim(),
-                id,
-                i.getAttribute('data-accel') || ''
-              ];
-            })
-        ];
-      });
-  }
+static mrb_value
+ascaridol_menu_trigger_body(mrb_state* mrb, void* p)
+{
+    auto* ctx = static_cast<ascaridol_menu_trigger_ctx*>(p);
+    return mrb_yield_argv(mrb, ctx->proc, 0, nullptr);
+}
 
-  function rebuild() {
-    var root = document.querySelector('menu#ascaridol-menu');
-    if (!root) return;
-    root.hidden = true;
-    __ascaridol_install_menu(scrape(root));
-  }
+/* Look up the proc bound under bind_sym in Ascaridol.@bindings and call it.
+ * Errors are printed and swallowed — menu activation is a UI event, not a
+ * Ruby caller. Main thread only. */
+static void
+ascaridol_trigger_menu_action(mrb_sym bind_sym)
+{
+    mrb_state* mrb = g_main_mrb.load(std::memory_order_acquire);
+    if (!mrb) return;
 
-  window.__ascaridol_menu_trigger = function (id) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    var code = el.getAttribute('data-action');
-    if (code) (new Function(code)).call(el);
-  };
+    mrb_int ai = mrb_gc_arena_save(mrb);
+    mrb_value asc = mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(Ascaridol)));
+    mrb_value bh = mrb_iv_get(mrb, asc, MRB_SYM(bindings));
+    if (mrb_hash_p(bh)) {
+        mrb_value proc = mrb_hash_fetch(mrb, bh,
+            mrb_symbol_value(bind_sym), mrb_undef_value());
+        if (mrb_proc_p(proc)) {
+            ascaridol_menu_trigger_ctx ctx{ proc };
+            mrb_bool err = FALSE;
+            mrb_protect_error(mrb, ascaridol_menu_trigger_body, &ctx, &err);
+            if (err && mrb->exc) {
+                mrb_print_error(mrb);
+                mrb->exc = nullptr;
+            }
+        }
+    }
+    mrb_gc_arena_restore(mrb, ai);
+}
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', rebuild);
-  } else {
-    rebuild();
-  }
-})();
-)JS";
+struct AscaridolMenuItemSpec {
+    bool is_separator = false;
+    std::string label;
+    mrb_sym bind_sym = 0;
+    std::string accel;
+};
+
+static bool
+ascaridol_parse_item(mrb_state* mrb, mrb_value item, AscaridolMenuItemSpec& out)
+{
+    if (!mrb_array_p(item)) return false;
+    mrb_int len = RARRAY_LEN(item);
+    if (len < 1) return false;
+
+    mrb_value first = mrb_ary_ref(mrb, item, 0);
+    if (mrb_symbol_p(first) && mrb_symbol(first) == MRB_SYM(separator)) {
+        out.is_separator = true;
+        return true;
+    }
+    if (len < 2) return false;
+    if (!mrb_string_p(first)) return false;
+    mrb_value sym_v = mrb_ary_ref(mrb, item, 1);
+    if (!mrb_symbol_p(sym_v)) return false;
+
+    out.label = std::string(RSTRING_PTR(first), RSTRING_LEN(first));
+    out.bind_sym = mrb_symbol(sym_v);
+
+    if (len > 2) {
+        mrb_value accel_v = mrb_ary_ref(mrb, item, 2);
+        if (mrb_string_p(accel_v)) {
+            std::string raw(RSTRING_PTR(accel_v), RSTRING_LEN(accel_v));
+            out.accel = ascaridol_translate_accel(raw.c_str());
+        }
+    }
+    return true;
+}
 
 /* ---- Win32 -------------------------------------------------------------- */
 
 #if defined(WEBVIEW_EDGE)
-
-/* ASCARIDOL_WIN32_ACCEL_PATCH_V1 */
 
 #include <WebView2.h>
 
@@ -1102,13 +1149,12 @@ struct AscaridolWin32Accel {
 
 struct AscaridolWin32MenuItem {
     UINT id;
-    std::string dom_id;
+    mrb_sym bind_sym;
     AscaridolWin32Accel accel;
 };
 
-/* Parse "Ctrl+N" / "Shift+Alt+F4" / "Cmd+S" into vkey + modifier flags.
- * Cmd is accepted as an alias for Ctrl so the same Ascaridol.platform
- * branch on the Ruby side works for users who copy mac accels to win. */
+static std::vector<AscaridolWin32MenuItem> g_win32_menu_items;
+
 static AscaridolWin32Accel
 parse_win32_accel(const char* s)
 {
@@ -1120,13 +1166,9 @@ parse_win32_accel(const char* s)
         if (buf.empty()) return;
         std::string upper = buf;
         for (char& c : upper) c = (char)std::toupper((unsigned char)c);
-
-        if      (upper == "CTRL" || upper == "CONTROL" || upper == "CMD" || upper == "COMMAND")
-            a.ctrl = true;
-        else if (upper == "SHIFT")
-            a.shift = true;
-        else if (upper == "ALT" || upper == "OPT" || upper == "OPTION" || upper == "MENU")
-            a.alt = true;
+        if      (upper == "CTRL" || upper == "CONTROL" || upper == "CMD" || upper == "COMMAND") a.ctrl = true;
+        else if (upper == "SHIFT") a.shift = true;
+        else if (upper == "ALT" || upper == "OPT" || upper == "OPTION" || upper == "MENU") a.alt = true;
         else if (upper == "F1")  a.vkey = VK_F1;
         else if (upper == "F2")  a.vkey = VK_F2;
         else if (upper == "F3")  a.vkey = VK_F3;
@@ -1164,28 +1206,17 @@ parse_win32_accel(const char* s)
     return a;
 }
 
-/* Minimal COM impl. webview2 AddRefs on add_AcceleratorKeyPressed and
- * Releases when the controller is torn down; we Release our initial ref
- * after handoff and let the runtime own lifetime. */
-/* ASCARIDOL_WIN32_ACCEL_FIXUP_V1 */
-static std::vector<AscaridolWin32MenuItem> g_win32_menu_items;
-
 class AscaridolKeyHandler : public ICoreWebView2AcceleratorKeyPressedEventHandler {
     LONG m_refs = 1;
 public:
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
         if (riid == IID_IUnknown ||
             riid == __uuidof(ICoreWebView2AcceleratorKeyPressedEventHandler)) {
-            *ppv = this;
-            AddRef();
-            return S_OK;
+            *ppv = this; AddRef(); return S_OK;
         }
-        *ppv = nullptr;
-        return E_NOINTERFACE;
+        *ppv = nullptr; return E_NOINTERFACE;
     }
-    ULONG STDMETHODCALLTYPE AddRef() override {
-        return InterlockedIncrement(&m_refs);
-    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_refs); }
     ULONG STDMETHODCALLTYPE Release() override {
         ULONG r = (ULONG)InterlockedDecrement(&m_refs);
         if (r == 0) delete this;
@@ -1198,9 +1229,8 @@ public:
         COREWEBVIEW2_KEY_EVENT_KIND kind;
         if (FAILED(args->get_KeyEventKind(&kind))) return S_OK;
         if (kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN &&
-            kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN) {
-            return S_OK;
-        }
+            kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN) return S_OK;
+
         UINT vkey;
         if (FAILED(args->get_VirtualKey(&vkey))) return S_OK;
 
@@ -1209,29 +1239,22 @@ public:
         bool alt   = (GetKeyState(VK_MENU)    & 0x8000) != 0;
 
         for (auto& it : g_win32_menu_items) {
-            if (it.accel.vkey == 0)             continue;
-            if (it.accel.vkey  != vkey)         continue;
-            if (it.accel.ctrl  != ctrl)         continue;
-            if (it.accel.shift != shift)        continue;
-            if (it.accel.alt   != alt)          continue;
+            if (it.bind_sym == 0)             continue;
+            if (it.accel.vkey == 0)           continue;
+            if (it.accel.vkey  != vkey)       continue;
+            if (it.accel.ctrl  != ctrl)       continue;
+            if (it.accel.shift != shift)      continue;
+            if (it.accel.alt   != alt)        continue;
             args->put_Handled(TRUE);
-            webview::webview* wv = g_wv.load(std::memory_order_acquire);
-            if (wv) {
-                std::string js = "window.__ascaridol_menu_trigger(\"";
-                js += it.dom_id;
-                js += "\")";
-                wv->eval(js);
-            }
+            ascaridol_trigger_menu_action(it.bind_sym);
             return S_OK;
         }
         return S_OK;
     }
 };
 
-static bool g_win32_accel_handler_installed = false;
-
-
 static bool g_win32_menu_subclass_installed = false;
+static bool g_win32_accel_handler_installed = false;
 static const UINT MRB_ASCARIDOL_MENU_ID_BASE = 0xA000;
 
 static LRESULT CALLBACK
@@ -1241,14 +1264,8 @@ ascaridol_menu_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
     if (msg == WM_COMMAND && HIWORD(wParam) == 0) {
         UINT id = LOWORD(wParam);
         for (auto& it : g_win32_menu_items) {
-            if (it.id == id) {
-                webview::webview* wv = g_wv.load(std::memory_order_acquire);
-                if (wv) {
-                    std::string js = "window.__ascaridol_menu_trigger(\"";
-                    js += it.dom_id;
-                    js += "\")";
-                    wv->eval(js);
-                }
+            if (it.id == id && it.bind_sym != 0) {
+                ascaridol_trigger_menu_action(it.bind_sym);
                 return 0;
             }
         }
@@ -1271,39 +1288,38 @@ ascaridol_install_menu_native(webview::webview* wv, mrb_state* mrb, mrb_value sp
     for (mrb_int i = 0; i < RARRAY_LEN(spec); i++) {
         mrb_value group = mrb_ary_ref(mrb, spec, i);
         if (!mrb_array_p(group) || RARRAY_LEN(group) < 2) continue;
-        const char* g_lbl = RSTRING_CSTR(mrb, mrb_ary_ref(mrb, group, 0));
+        mrb_value glabel_v = mrb_ary_ref(mrb, group, 0);
+        if (!mrb_string_p(glabel_v)) continue;
+        const char* g_lbl = RSTRING_CSTR(mrb, glabel_v);
         mrb_value items   = mrb_ary_ref(mrb, group, 1);
         if (!mrb_array_p(items)) continue;
 
         HMENU sub = CreatePopupMenu();
         for (mrb_int j = 0; j < RARRAY_LEN(items); j++) {
-            mrb_value item = mrb_ary_ref(mrb, items, j);
-            if (!mrb_array_p(item) || RARRAY_LEN(item) < 2) continue;
-            const char* label  = RSTRING_CSTR(mrb, mrb_ary_ref(mrb, item, 0));
-            const char* dom_id = RSTRING_CSTR(mrb, mrb_ary_ref(mrb, item, 1));
-            const char* accel  = RARRAY_LEN(item) > 2
-                ? RSTRING_CSTR(mrb, mrb_ary_ref(mrb, item, 2)) : "";
+            AscaridolMenuItemSpec it;
+            if (!ascaridol_parse_item(mrb, mrb_ary_ref(mrb, items, j), it)) continue;
 
-            UINT id = MRB_ASCARIDOL_MENU_ID_BASE
-                + (UINT)g_win32_menu_items.size();
+            if (it.is_separator) {
+                AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
+                continue;
+            }
+
+            UINT id = MRB_ASCARIDOL_MENU_ID_BASE + (UINT)g_win32_menu_items.size();
             AscaridolWin32MenuItem entry;
-            entry.id     = id;
-            entry.dom_id = dom_id;
-            if (accel && *accel) entry.accel = parse_win32_accel(accel);
+            entry.id = id;
+            entry.bind_sym = it.bind_sym;
+            if (!it.accel.empty()) entry.accel = parse_win32_accel(it.accel.c_str());
             g_win32_menu_items.push_back(std::move(entry));
 
-            std::string display = label;
-            if (accel && *accel) { display += "\t"; display += accel; }
+            std::string display = it.label;
+            if (!it.accel.empty()) { display += "\t"; display += it.accel; }
             AppendMenuA(sub, MF_STRING, id, display.c_str());
         }
         AppendMenuA(bar, MF_POPUP, (UINT_PTR)sub, g_lbl);
     }
 
     HMENU old = GetMenu(hwnd);
-    if (!SetMenu(hwnd, bar)) {
-        DestroyMenu(bar);
-        return;
-    }
+    if (!SetMenu(hwnd, bar)) { DestroyMenu(bar); return; }
     if (old) DestroyMenu(old);
 
     SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
@@ -1328,8 +1344,6 @@ ascaridol_install_menu_native(webview::webview* wv, mrb_state* mrb, mrb_value sp
     }
 }
 
-/* attach_menu_and_icon now only sets the window icon. Menus are opt-in
- * via Ascaridol.enable_html_menu. */
 static void
 attach_menu_and_icon(webview::webview* wv)
 {
@@ -1340,11 +1354,9 @@ attach_menu_and_icon(webview::webview* wv)
 
     HINSTANCE hinst = GetModuleHandleA(nullptr);
     HICON small_icon = (HICON)LoadImageA(hinst, MAKEINTRESOURCEA(1), IMAGE_ICON,
-        GetSystemMetrics(SM_CXSMICON),
-        GetSystemMetrics(SM_CYSMICON), 0);
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
     HICON big_icon = (HICON)LoadImageA(hinst, MAKEINTRESOURCEA(1), IMAGE_ICON,
-        GetSystemMetrics(SM_CXICON),
-        GetSystemMetrics(SM_CYICON), 0);
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0);
     if (small_icon) SendMessageA(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)small_icon);
     if (big_icon)   SendMessageA(hwnd, WM_SETICON, ICON_BIG, (LPARAM)big_icon);
 }
@@ -1365,6 +1377,8 @@ inline id  oc_call(id o, const char* s, id a)       { return ((id(*)(id,SEL,id))
 inline void oc_void(id o, const char* s, id a)      { ((void(*)(id,SEL,id))objc_msgSend)(o, sel_registerName(s), a); }
 inline void oc_void(id o, const char* s, unsigned long a) { ((void(*)(id,SEL,unsigned long))objc_msgSend)(o, sel_registerName(s), a); }
 inline id  ns_str (const char* u)                   { return ((id(*)(id,SEL,const char*))objc_msgSend)(oc_cls("NSString"), sel_registerName("stringWithUTF8String:"), u ? u : ""); }
+inline id  ns_num_ll(long long v)                   { return ((id(*)(id,SEL,long long))objc_msgSend)(oc_cls("NSNumber"), sel_registerName("numberWithLongLong:"), v); }
+inline long long ns_num_get(id n)                   { return ((long long(*)(id,SEL))objc_msgSend)(n, sel_registerName("longLongValue")); }
 }
 
 static const unsigned long ASCARIDOL_MOD_SHIFT   = 1UL << 17;
@@ -1403,23 +1417,16 @@ ascaridol_menu_trigger_imp(id /*self*/, SEL /*_cmd*/, id sender)
 {
     id repobj = oc_call(sender, "representedObject");
     if (!repobj) return;
-    const char* dom_id = ((const char*(*)(id,SEL))objc_msgSend)(
-        repobj, sel_registerName("UTF8String"));
-    if (!dom_id || !*dom_id) return;
-    webview::webview* wv = g_wv.load(std::memory_order_acquire);
-    if (!wv) return;
-    std::string js = "window.__ascaridol_menu_trigger(\"";
-    js += dom_id;
-    js += "\")";
-    wv->eval(js);
+    mrb_sym bind_sym = (mrb_sym)ns_num_get(repobj);
+    if (bind_sym == 0) return;
+    ascaridol_trigger_menu_action(bind_sym);
 }
 
 static void
 ensure_ascaridol_menu_target()
 {
     if (g_ascaridol_menu_target) return;
-    Class c = objc_allocateClassPair(objc_getClass("NSObject"),
-        "AscaridolMenuTarget", 0);
+    Class c = objc_allocateClassPair(objc_getClass("NSObject"), "AscaridolMenuTarget", 0);
     class_addMethod(c, sel_registerName("ascaridolTrigger:"),
                     (IMP)ascaridol_menu_trigger_imp, "v@:@");
     objc_registerClassPair(c);
@@ -1431,52 +1438,53 @@ ascaridol_install_menu_native(webview::webview* /*wv*/, mrb_state* mrb, mrb_valu
 {
     ensure_ascaridol_menu_target();
 
-    id menubar = oc_call(oc_call(oc_cls("NSMenu"), "alloc"),
-        "initWithTitle:", ns_str(""));
+    id menubar = oc_call(oc_call(oc_cls("NSMenu"), "alloc"), "initWithTitle:", ns_str(""));
 
-    /* Cocoa requires index 0 to be the app menu — even an empty one,
-     * or the first user submenu gets hidden as if it were the app menu. */
+    /* App-menu placeholder at index 0 — Cocoa hides the first user submenu otherwise. */
     id app_item = oc_call(oc_call(oc_cls("NSMenuItem"), "alloc"), "init");
-    id app_sub  = oc_call(oc_call(oc_cls("NSMenu"), "alloc"),
-        "initWithTitle:", ns_str(""));
+    id app_sub  = oc_call(oc_call(oc_cls("NSMenu"), "alloc"), "initWithTitle:", ns_str(""));
     oc_void(app_item, "setSubmenu:", app_sub);
     oc_void(menubar, "addItem:", app_item);
 
     for (mrb_int i = 0; i < RARRAY_LEN(spec); i++) {
         mrb_value group = mrb_ary_ref(mrb, spec, i);
         if (!mrb_array_p(group) || RARRAY_LEN(group) < 2) continue;
-        const char* g_lbl = RSTRING_CSTR(mrb, mrb_ary_ref(mrb, group, 0));
+        mrb_value glabel_v = mrb_ary_ref(mrb, group, 0);
+        if (!mrb_string_p(glabel_v)) continue;
+        const char* g_lbl = RSTRING_CSTR(mrb, glabel_v);
         mrb_value items   = mrb_ary_ref(mrb, group, 1);
         if (!mrb_array_p(items)) continue;
 
-        id sub = oc_call(oc_call(oc_cls("NSMenu"), "alloc"),
-            "initWithTitle:", ns_str(g_lbl));
+        id sub = oc_call(oc_call(oc_cls("NSMenu"), "alloc"), "initWithTitle:", ns_str(g_lbl));
         id grp = oc_call(oc_call(oc_cls("NSMenuItem"), "alloc"), "init");
         oc_void(grp, "setTitle:", ns_str(g_lbl));
         oc_void(grp, "setSubmenu:", sub);
         oc_void(menubar, "addItem:", grp);
 
         for (mrb_int j = 0; j < RARRAY_LEN(items); j++) {
-            mrb_value item = mrb_ary_ref(mrb, items, j);
-            if (!mrb_array_p(item) || RARRAY_LEN(item) < 2) continue;
-            const char* label  = RSTRING_CSTR(mrb, mrb_ary_ref(mrb, item, 0));
-            const char* dom_id = RSTRING_CSTR(mrb, mrb_ary_ref(mrb, item, 1));
-            const char* accel  = RARRAY_LEN(item) > 2
-                ? RSTRING_CSTR(mrb, mrb_ary_ref(mrb, item, 2)) : "";
+            AscaridolMenuItemSpec it;
+            if (!ascaridol_parse_item(mrb, mrb_ary_ref(mrb, items, j), it)) continue;
+
+            if (it.is_separator) {
+                id sep = ((id(*)(id,SEL))objc_msgSend)(
+                    oc_cls("NSMenuItem"), sel_registerName("separatorItem"));
+                oc_void(sub, "addItem:", sep);
+                continue;
+            }
 
             std::string key_eq;
             unsigned long mods = 0;
-            if (accel && *accel) parse_cocoa_accel(accel, key_eq, mods);
+            if (!it.accel.empty()) parse_cocoa_accel(it.accel.c_str(), key_eq, mods);
 
             id mi = ((id(*)(id,SEL,id,SEL,id))objc_msgSend)(
                 oc_call(oc_cls("NSMenuItem"), "alloc"),
                 sel_registerName("initWithTitle:action:keyEquivalent:"),
-                ns_str(label),
+                ns_str(it.label.c_str()),
                 sel_registerName("ascaridolTrigger:"),
                 ns_str(key_eq.c_str()));
             oc_void(mi, "setKeyEquivalentModifierMask:", mods);
             oc_void(mi, "setTarget:", g_ascaridol_menu_target);
-            oc_void(mi, "setRepresentedObject:", ns_str(dom_id));
+            oc_void(mi, "setRepresentedObject:", ns_num_ll((long long)it.bind_sym));
             oc_void(sub, "addItem:", mi);
         }
     }
@@ -1506,14 +1514,10 @@ static void
 ascaridol_action_trigger(GSimpleAction*, GVariant* param, gpointer)
 {
     if (!param) return;
-    const char* dom_id = g_variant_get_string(param, nullptr);
-    if (!dom_id || !*dom_id) return;
-    webview::webview* wv = g_wv.load(std::memory_order_acquire);
-    if (!wv) return;
-    std::string js = "window.__ascaridol_menu_trigger(\"";
-    js += dom_id;
-    js += "\")";
-    wv->eval(js);
+    if (!g_variant_is_of_type(param, G_VARIANT_TYPE_INT64)) return;
+    mrb_sym bind_sym = (mrb_sym)g_variant_get_int64(param);
+    if (bind_sym == 0) return;
+    ascaridol_trigger_menu_action(bind_sym);
 }
 
 static void
@@ -1524,22 +1528,17 @@ ascaridol_menu_first_time_setup(webview::webview* wv)
     g_menu_webview_widget = GTK_WIDGET(wv->widget().value());
 
     GSimpleActionGroup* grp = g_simple_action_group_new();
-    GSimpleAction* trigger = g_simple_action_new("trigger",
-        G_VARIANT_TYPE_STRING);
-    g_signal_connect(trigger, "activate",
-        G_CALLBACK(ascaridol_action_trigger), nullptr);
+    GSimpleAction* trigger = g_simple_action_new("trigger", G_VARIANT_TYPE_INT64);
+    g_signal_connect(trigger, "activate", G_CALLBACK(ascaridol_action_trigger), nullptr);
     g_action_map_add_action(G_ACTION_MAP(grp), G_ACTION(trigger));
     g_object_unref(trigger);
-    gtk_widget_insert_action_group(GTK_WIDGET(g_menu_window), "ascaridol",
-        G_ACTION_GROUP(grp));
+    gtk_widget_insert_action_group(GTK_WIDGET(g_menu_window), "ascaridol", G_ACTION_GROUP(grp));
     g_object_unref(grp);
 
     g_menu_shortcut_ctrl = gtk_shortcut_controller_new();
     gtk_shortcut_controller_set_scope(
-        GTK_SHORTCUT_CONTROLLER(g_menu_shortcut_ctrl),
-        GTK_SHORTCUT_SCOPE_GLOBAL);
-    gtk_widget_add_controller(GTK_WIDGET(g_menu_window),
-        g_menu_shortcut_ctrl);
+        GTK_SHORTCUT_CONTROLLER(g_menu_shortcut_ctrl), GTK_SHORTCUT_SCOPE_GLOBAL);
+    gtk_widget_add_controller(GTK_WIDGET(g_menu_window), g_menu_shortcut_ctrl);
 
     g_object_ref(g_menu_webview_widget);
     gtk_window_set_child(g_menu_window, nullptr);
@@ -1574,43 +1573,55 @@ ascaridol_install_menu_native(webview::webview* wv, mrb_state* mrb, mrb_value sp
     for (mrb_int i = 0; i < RARRAY_LEN(spec); i++) {
         mrb_value group = mrb_ary_ref(mrb, spec, i);
         if (!mrb_array_p(group) || RARRAY_LEN(group) < 2) continue;
-        const char* g_lbl = RSTRING_CSTR(mrb, mrb_ary_ref(mrb, group, 0));
+        mrb_value glabel_v = mrb_ary_ref(mrb, group, 0);
+        if (!mrb_string_p(glabel_v)) continue;
+        const char* g_lbl = RSTRING_CSTR(mrb, glabel_v);
         mrb_value items   = mrb_ary_ref(mrb, group, 1);
         if (!mrb_array_p(items)) continue;
 
         GMenu* sub = g_menu_new();
+        GMenu* current = sub;
+        bool current_owned_by_sub = true;
+
         for (mrb_int j = 0; j < RARRAY_LEN(items); j++) {
-            mrb_value item = mrb_ary_ref(mrb, items, j);
-            if (!mrb_array_p(item) || RARRAY_LEN(item) < 2) continue;
-            const char* label  = RSTRING_CSTR(mrb, mrb_ary_ref(mrb, item, 0));
-            const char* dom_id = RSTRING_CSTR(mrb, mrb_ary_ref(mrb, item, 1));
-            const char* accel  = RARRAY_LEN(item) > 2
-                ? RSTRING_CSTR(mrb, mrb_ary_ref(mrb, item, 2)) : "";
+            AscaridolMenuItemSpec it;
+            if (!ascaridol_parse_item(mrb, mrb_ary_ref(mrb, items, j), it)) continue;
 
-            GMenuItem* mi = g_menu_item_new(label, nullptr);
+            if (it.is_separator) {
+                GMenu* next = g_menu_new();
+                g_menu_append_section(sub, nullptr, G_MENU_MODEL(next));
+                if (!current_owned_by_sub) g_object_unref(current);
+                current = next;
+                current_owned_by_sub = false;
+                continue;
+            }
+
+            GMenuItem* mi = g_menu_item_new(it.label.c_str(), nullptr);
             g_menu_item_set_action_and_target_value(mi, "ascaridol.trigger",
-                g_variant_new_string(dom_id));
+                g_variant_new_int64((gint64)it.bind_sym));
 
-            if (accel && *accel) {
+            if (!it.accel.empty()) {
                 g_menu_item_set_attribute_value(mi, "accel",
-                    g_variant_new_string(accel));
+                    g_variant_new_string(it.accel.c_str()));
                 guint key = 0;
                 GdkModifierType mods = (GdkModifierType)0;
-                gtk_accelerator_parse(accel, &key, &mods);
+                gtk_accelerator_parse(it.accel.c_str(), &key, &mods);
                 if (key) {
                     GtkShortcut* sc = gtk_shortcut_new(
                         gtk_keyval_trigger_new(key, mods),
                         gtk_named_action_new("ascaridol.trigger"));
                     gtk_shortcut_set_arguments(sc,
-                        g_variant_new_string(dom_id));
+                        g_variant_new_int64((gint64)it.bind_sym));
                     gtk_shortcut_controller_add_shortcut(
                         GTK_SHORTCUT_CONTROLLER(g_menu_shortcut_ctrl), sc);
                 }
             }
 
-            g_menu_append_item(sub, mi);
+            g_menu_append_item(current, mi);
             g_object_unref(mi);
         }
+        if (!current_owned_by_sub) g_object_unref(current);
+
         g_menu_append_submenu(bar, g_lbl, G_MENU_MODEL(sub));
         g_object_unref(sub);
     }
@@ -1620,7 +1631,6 @@ ascaridol_install_menu_native(webview::webview* wv, mrb_state* mrb, mrb_value sp
     if (g_menu_bar_widget) {
         gtk_box_remove(GTK_BOX(g_menu_box), g_menu_bar_widget);
     }
-    /* Insert before any existing child (the webview). */
     gtk_box_insert_child_after(GTK_BOX(g_menu_box), new_bar, nullptr);
     g_menu_bar_widget = new_bar;
 }
@@ -1632,15 +1642,10 @@ static GtkAccelGroup* g_menu_accel_group = nullptr;
 static void
 ascaridol_on_item_activate(GtkMenuItem* item, gpointer)
 {
-    const char* dom_id = (const char*)g_object_get_data(G_OBJECT(item),
-        "ascaridol-dom-id");
-    if (!dom_id || !*dom_id) return;
-    webview::webview* wv = g_wv.load(std::memory_order_acquire);
-    if (!wv) return;
-    std::string js = "window.__ascaridol_menu_trigger(\"";
-    js += dom_id;
-    js += "\")";
-    wv->eval(js);
+    mrb_sym bind_sym = (mrb_sym)(uintptr_t)g_object_get_data(G_OBJECT(item),
+        "ascaridol-bind-sym");
+    if (bind_sym == 0) return;
+    ascaridol_trigger_menu_action(bind_sym);
 }
 
 static void
@@ -1657,8 +1662,7 @@ ascaridol_menu_first_time_setup(webview::webview* wv)
     GtkWidget* current = gtk_bin_get_child(GTK_BIN(g_menu_window));
     if (current) gtk_container_remove(GTK_CONTAINER(g_menu_window), current);
     g_menu_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_pack_start(GTK_BOX(g_menu_box), g_menu_webview_widget,
-        TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(g_menu_box), g_menu_webview_widget, TRUE, TRUE, 0);
     g_object_unref(g_menu_webview_widget);
     gtk_container_add(GTK_CONTAINER(g_menu_window), g_menu_box);
     gtk_widget_show_all(g_menu_box);
@@ -1673,7 +1677,9 @@ ascaridol_install_menu_native(webview::webview* wv, mrb_state* mrb, mrb_value sp
     for (mrb_int i = 0; i < RARRAY_LEN(spec); i++) {
         mrb_value group = mrb_ary_ref(mrb, spec, i);
         if (!mrb_array_p(group) || RARRAY_LEN(group) < 2) continue;
-        const char* g_lbl = RSTRING_CSTR(mrb, mrb_ary_ref(mrb, group, 0));
+        mrb_value glabel_v = mrb_ary_ref(mrb, group, 0);
+        if (!mrb_string_p(glabel_v)) continue;
+        const char* g_lbl = RSTRING_CSTR(mrb, glabel_v);
         mrb_value items   = mrb_ary_ref(mrb, group, 1);
         if (!mrb_array_p(items)) continue;
 
@@ -1682,27 +1688,28 @@ ascaridol_install_menu_native(webview::webview* wv, mrb_state* mrb, mrb_value sp
         gtk_menu_item_set_submenu(GTK_MENU_ITEM(group_item), sub);
 
         for (mrb_int j = 0; j < RARRAY_LEN(items); j++) {
-            mrb_value item = mrb_ary_ref(mrb, items, j);
-            if (!mrb_array_p(item) || RARRAY_LEN(item) < 2) continue;
-            const char* label  = RSTRING_CSTR(mrb, mrb_ary_ref(mrb, item, 0));
-            const char* dom_id = RSTRING_CSTR(mrb, mrb_ary_ref(mrb, item, 1));
-            const char* accel  = RARRAY_LEN(item) > 2
-                ? RSTRING_CSTR(mrb, mrb_ary_ref(mrb, item, 2)) : "";
+            AscaridolMenuItemSpec it;
+            if (!ascaridol_parse_item(mrb, mrb_ary_ref(mrb, items, j), it)) continue;
 
-            GtkWidget* mi = gtk_menu_item_new_with_label(label);
-            g_object_set_data_full(G_OBJECT(mi), "ascaridol-dom-id",
-                g_strdup(dom_id), g_free);
+            if (it.is_separator) {
+                GtkWidget* sep = gtk_separator_menu_item_new();
+                gtk_menu_shell_append(GTK_MENU_SHELL(sub), sep);
+                continue;
+            }
+
+            GtkWidget* mi = gtk_menu_item_new_with_label(it.label.c_str());
+            g_object_set_data(G_OBJECT(mi), "ascaridol-bind-sym",
+                (gpointer)(uintptr_t)it.bind_sym);
             g_signal_connect(mi, "activate",
                 G_CALLBACK(ascaridol_on_item_activate), nullptr);
 
-            if (accel && *accel) {
+            if (!it.accel.empty()) {
                 guint key = 0;
                 GdkModifierType mods = (GdkModifierType)0;
-                gtk_accelerator_parse(accel, &key, &mods);
+                gtk_accelerator_parse(it.accel.c_str(), &key, &mods);
                 if (key) {
                     gtk_widget_add_accelerator(mi, "activate",
-                        g_menu_accel_group, key, mods,
-                        GTK_ACCEL_VISIBLE);
+                        g_menu_accel_group, key, mods, GTK_ACCEL_VISIBLE);
                 }
             }
             gtk_menu_shell_append(GTK_MENU_SHELL(sub), mi);
@@ -1729,19 +1736,18 @@ static void ascaridol_install_menu_native(webview::webview*, mrb_state*,
     mrb_value) {}
 #endif
 
-/* ---- Ascaridol.enable_html_menu — Ruby-facing installer ------------------ */
+/* ---- Ascaridol.menu= — Ruby-facing setter ------------------------------- */
 
-/* Hidden binding body: receives the scraped spec array and builds the
- * native menu. Goes through the standard bind/JSON-parse machinery, so
- * raises in here become rejected promises on the JS side. */
 static mrb_value
-ascaridol_html_menu_proc_body(mrb_state* mrb, mrb_value /*self*/)
+mrb_ascaridol_menu_set(mrb_state* mrb, mrb_value /*self*/)
 {
+    ascaridol_require_main_state(mrb, "Ascaridol.menu=");
     mrb_value spec;
     mrb_get_args(mrb, "A", &spec);
-    webview::webview* wv = g_wv.load(std::memory_order_acquire);
-    if (wv) ascaridol_install_menu_native(wv, mrb, spec);
-    return mrb_nil_value();
+
+    webview::webview* wv = ascaridol_require_running_local(mrb);
+    ascaridol_install_menu_native(wv, mrb, spec);
+    return spec;
 }
 
 /* ========================================================================= */
@@ -2121,25 +2127,6 @@ mrb_ascaridol_handle(mrb_state* mrb, mrb_value /*self*/)
     return ascaridol_native_handle_on_main(mrb, wv, kind);
 }
 
-/* Ascaridol.enable_html_menu — main only. Wires the bootstrap JS + the
- * hidden __ascaridol_install_menu binding. After this returns, any
- * <menu id="ascaridol-menu"> in the page becomes the native menu bar
- * on every DOMContentLoaded. */
-static mrb_value
-mrb_ascaridol_enable_html_menu(mrb_state* mrb, mrb_value /*self*/)
-{
-    ascaridol_require_main_state(mrb, "Ascaridol.enable_html_menu");
-    webview::webview* wv = ascaridol_require_running_local(mrb);
-
-    struct RProc* p = mrb_proc_new_cfunc(mrb, ascaridol_html_menu_proc_body);
-    mrb_value proc = mrb_obj_value(p);
-    ascaridol_bind_on_main(mrb, wv, MRB_SYM(__ascaridol_install_menu),
-        std::string("__ascaridol_install_menu"), proc);
-
-    ascaridol_check_result(mrb, wv->init(ASCARIDOL_MENU_BOOTSTRAP_JS));
-    return mrb_nil_value();
-}
-
 /* ========================================================================= */
 /* Gem extension: register lifecycle + main-only methods.                    */
 /* ========================================================================= */
@@ -2222,9 +2209,9 @@ ascaridol_install_runtime(mrb_state* mrb)
     mrb_define_class_method_id(mrb, asc, MRB_SYM(handle),
         mrb_ascaridol_handle, MRB_ARGS_OPT(1));
 
-    /* HTML-driven native menu. */
-    mrb_define_class_method_id(mrb, asc, MRB_SYM(enable_html_menu),
-        mrb_ascaridol_enable_html_menu, MRB_ARGS_NONE());
+    /* Ruby-driven native menu. */
+    mrb_define_class_method_id(mrb, asc, MRB_SYM_E(menu),
+        mrb_ascaridol_menu_set, MRB_ARGS_REQ(1));
 }
 
 #ifdef _WIN32
