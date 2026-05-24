@@ -1042,22 +1042,71 @@ static webview::webview* ascaridol_require_running_local(mrb_state* mrb);
 /* Accelerator "CmdOrCtrl" translates to Cmd on macOS, Ctrl elsewhere.      */
 /* ========================================================================= */
 
+/* ASCARIDOL_GTK_ACCEL_SYNTAX_V1 */
 static std::string
 ascaridol_translate_accel(const char* s)
 {
     if (!s || !*s) return {};
-    std::string out(s);
-#if defined(WEBVIEW_COCOA)
-    const char* repl = "Cmd";
+
+#if defined(WEBVIEW_GTK)
+    /* GTK wants "<Control><Shift>s" form for gtk_accelerator_parse and for
+     * the GMenuItem accel attribute display. Split on '+', wrap modifiers
+     * in <>, lowercase the key. */
+    std::vector<std::string> parts;
+    {
+        std::string buf;
+        auto flush = [&]() {
+            while (!buf.empty() && std::isspace((unsigned char)buf.front())) buf.erase(0, 1);
+            while (!buf.empty() && std::isspace((unsigned char)buf.back()))  buf.pop_back();
+            if (!buf.empty()) parts.push_back(buf);
+            buf.clear();
+        };
+        for (const char* p = s; *p; p++) { if (*p == '+') flush(); else buf += *p; }
+        flush();
+    }
+    if (parts.empty()) return {};
+
+    std::string out;
+    for (size_t i = 0; i + 1 < parts.size(); i++) {
+        std::string upper = parts[i];
+        for (char& c : upper) c = (char)std::toupper((unsigned char)c);
+        if (upper == "CMDORCTRL" || upper == "CTRL" || upper == "CONTROL" ||
+            upper == "CMD" || upper == "COMMAND") {
+            out += "<Control>";
+        } else if (upper == "SHIFT") {
+            out += "<Shift>";
+        } else if (upper == "ALT" || upper == "OPT" || upper == "OPTION") {
+            out += "<Alt>";
+        } else if (upper == "SUPER" || upper == "META") {
+            out += "<Super>";
+        } else {
+            out += "<" + parts[i] + ">";
+        }
+    }
+    std::string key = parts.back();
+    /* Single-char keys are lowercased; named keys (F1, Return, plus, minus...)
+     * are accepted by gtk_accelerator_parse in any case but lowercase is
+     * the canonical form. */
+    for (char& c : key) c = (char)std::tolower((unsigned char)c);
+    out += key;
+    return out;
 #else
+    /* Win32 and Cocoa: keep the "Ctrl+Q" / "Cmd+Q" shape that their own
+     * parsers (parse_win32_accel / parse_cocoa_accel) understand. Just
+     * swap "CmdOrCtrl" for the platform's primary modifier. */
+    std::string out(s);
+#  if defined(WEBVIEW_COCOA)
+    const char* repl = "Cmd";
+#  else
     const char* repl = "Ctrl";
-#endif
+#  endif
     size_t pos = 0;
     while ((pos = out.find("CmdOrCtrl", pos)) != std::string::npos) {
         out.replace(pos, 9, repl);
         pos += strlen(repl);
     }
     return out;
+#endif
 }
 
 struct ascaridol_menu_trigger_ctx { mrb_value proc; };
@@ -1601,12 +1650,19 @@ ascaridol_install_menu_native(webview::webview* wv, mrb_state* mrb, mrb_value sp
                 g_variant_new_int64((gint64)it.bind_sym));
 
             if (!it.accel.empty()) {
-                g_menu_item_set_attribute_value(mi, "accel",
-                    g_variant_new_string(it.accel.c_str()));
+                /* ASCARIDOL_GTK4_ACCEL_DISPLAY_V1 */
                 guint key = 0;
                 GdkModifierType mods = (GdkModifierType)0;
                 gtk_accelerator_parse(it.accel.c_str(), &key, &mods);
                 if (key) {
+                    /* Canonicalize for the menu attribute — GtkPopoverMenuBar
+                     * renders the label from this and wants "<Control>q"
+                     * form, not "Ctrl+Q". */
+                    gchar* gtk_name = gtk_accelerator_name(key, mods);
+                    g_menu_item_set_attribute_value(mi, "accel",
+                        g_variant_new_string(gtk_name));
+                    g_free(gtk_name);
+
                     GtkShortcut* sc = gtk_shortcut_new(
                         gtk_keyval_trigger_new(key, mods),
                         gtk_named_action_new("ascaridol.trigger"));
@@ -1614,6 +1670,21 @@ ascaridol_install_menu_native(webview::webview* wv, mrb_state* mrb, mrb_value sp
                         g_variant_new_int64((gint64)it.bind_sym));
                     gtk_shortcut_controller_add_shortcut(
                         GTK_SHORTCUT_CONTROLLER(g_menu_shortcut_ctrl), sc);
+                    /* ASCARIDOL_GTK4_NUMPAD_V1 */
+                    guint kp_equiv = 0;
+                    if      (key == GDK_KEY_plus  || key == GDK_KEY_equal) kp_equiv = GDK_KEY_KP_Add;
+                    else if (key == GDK_KEY_minus)                         kp_equiv = GDK_KEY_KP_Subtract;
+                    else if (key == GDK_KEY_asterisk)                      kp_equiv = GDK_KEY_KP_Multiply;
+                    else if (key == GDK_KEY_slash)                         kp_equiv = GDK_KEY_KP_Divide;
+                    if (kp_equiv) {
+                        GtkShortcut* kp_sc = gtk_shortcut_new(
+                            gtk_keyval_trigger_new(kp_equiv, mods),
+                            gtk_named_action_new("ascaridol.trigger"));
+                        gtk_shortcut_set_arguments(kp_sc,
+                            g_variant_new_int64((gint64)it.bind_sym));
+                        gtk_shortcut_controller_add_shortcut(
+                            GTK_SHORTCUT_CONTROLLER(g_menu_shortcut_ctrl), kp_sc);
+                    }
                 }
             }
 
@@ -1704,12 +1775,24 @@ ascaridol_install_menu_native(webview::webview* wv, mrb_state* mrb, mrb_value sp
                 G_CALLBACK(ascaridol_on_item_activate), nullptr);
 
             if (!it.accel.empty()) {
+                /* ASCARIDOL_GTK3_NUMPAD_V1 */
                 guint key = 0;
                 GdkModifierType mods = (GdkModifierType)0;
                 gtk_accelerator_parse(it.accel.c_str(), &key, &mods);
                 if (key) {
                     gtk_widget_add_accelerator(mi, "activate",
                         g_menu_accel_group, key, mods, GTK_ACCEL_VISIBLE);
+                    /* Also bind numpad equivalents. */
+                    guint kp_equiv = 0;
+                    if      (key == GDK_KEY_plus  || key == GDK_KEY_equal) kp_equiv = GDK_KEY_KP_Add;
+                    else if (key == GDK_KEY_minus)                         kp_equiv = GDK_KEY_KP_Subtract;
+                    else if (key == GDK_KEY_asterisk)                      kp_equiv = GDK_KEY_KP_Multiply;
+                    else if (key == GDK_KEY_slash)                         kp_equiv = GDK_KEY_KP_Divide;
+                    if (kp_equiv) {
+                        gtk_widget_add_accelerator(mi, "activate",
+                            g_menu_accel_group, kp_equiv, mods,
+                            (GtkAccelFlags)0);
+                    }
                 }
             }
             gtk_menu_shell_append(GTK_MENU_SHELL(sub), mi);
