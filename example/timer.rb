@@ -2,7 +2,7 @@
 def main
   count = 0
   Ascaridol.ready do
-    Ascaridol.add_timer(1000) do
+    Ascaridol.add_timer(1.s) do
       count += 1
       Ascaridol.eval("document.getElementById('counter').textContent = #{count}")
       true

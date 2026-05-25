@@ -255,47 +255,17 @@ module Ascaridol
   end
 end
 
-module Ascaridol
-  class EventLoop < URL::EventLoop
-    WHAT_TO_READINESS = { in: :r, out: :w, inout: :rw }.freeze
-    READINESS_TO_WHAT = { r: :in, w: :out, rw: :inout, err: :err }.freeze
-
-    def initialize(session)
-      @session = session
-      @timer   = nil
-    end
-
-    def on_socket(io, what)
-      if what == :remove
-        Ascaridol.remove_native_event(io)
-        return
-      end
-
-      readiness = WHAT_TO_READINESS[what] || :r
-      Ascaridol.add_native_event(io, readiness) do |_fd, cond|
-        @session.socket_action(io, READINESS_TO_WHAT[cond] || :in)
-        drain
-        true
-      end
-    end
-
-    def on_timer(ms)
-      @timer&.cancel
-      @timer = nil
-      return if ms < 0
-      @timer = Ascaridol.add_timer(ms) do
-        @session.socket_action
-        drain
-        false
-      end
-    end
-
-    private
-
-    def drain
-      @session.info_read do |req, code|
-        @session.remove(req) rescue nil
-      end
-    end
+class Ascaridol::EventLoop < URL::EventLoop
+  def watch(io, readiness, &block)
+    Ascaridol.add_native_event(io, readiness, &block)
+  end
+  def unwatch(handle)
+    Ascaridol.remove_native_event(handle)
+  end
+  def arm_timer(ms, &block)
+    Ascaridol.add_timer(ms, &block)
+  end
+  def cancel_timer(timer)
+    timer.cancel
   end
 end
