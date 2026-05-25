@@ -2359,7 +2359,9 @@ main(const int argc, const char* const argv[])
     mrb_state* mrb = mrb_open();
     if (!mrb) return 1;
     g_main_mrb.store(mrb, std::memory_order_release);
+#ifdef MRB_DEBUG
     mrb->code_fetch_hook = trace_fetch;
+#endif
 
     int exit_code = 0;
 
