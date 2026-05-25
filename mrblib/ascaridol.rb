@@ -254,18 +254,3 @@ module Ascaridol
     JS
   end
 end
-
-class Ascaridol::EventLoop < URL::EventLoop
-  def watch(io, readiness, &block)
-    Ascaridol.add_native_event(io, readiness, &block)
-  end
-  def unwatch(handle)
-    Ascaridol.remove_native_event(handle)
-  end
-  def arm_timer(ms, &block)
-    Ascaridol.add_timer(ms, &block)
-  end
-  def cancel_timer(timer)
-    timer.cancel
-  end
-end
