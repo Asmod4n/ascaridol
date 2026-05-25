@@ -248,9 +248,8 @@ end
 class App
   def initialize
     @store        = HNStore.new(DB_DIR)
-    @parser       = SSEParser.new            # parser for the main SSE feed
-    @pending      = []                       # work deferred out of curl callbacks
-    @subs         = {}                       # id => { mode:, parser:, last_event: }
+    @parser       = SSEParser.new
+    @subs         = {}
     @paused       = false
     @reconnect_ms = 1_000
   end
@@ -268,7 +267,7 @@ class App
   # ----- Lifecycle ----------------------------------------------------------
 
   def on_ready
-    URL.shared.event_loop = Ascaridol::EventLoop.new(URL.shared)
+    URL.default_loop = Ascaridol::EventLoop.new
     rehydrate
     connect
     Ascaridol.add_timer(1.s)              { refresh_times }
@@ -297,16 +296,13 @@ class App
         new_ids = ids.first(FETCH_COUNT).reject { |id| @store.has?(id) }
         next if new_ids.empty?
 
-        @pending << lambda do
-          new_ids.each_with_index do |id, idx|
-            if idx < MAX_SSE
-              promote_to_sse(id)
-            else
-              fetch_once(id)
-            end
+        new_ids.each_with_index do |id, idx|
+          if idx < MAX_SSE
+            promote_to_sse(id)
+          else
+            fetch_once(id)
           end
         end
-        Ascaridol.add_timer(0.ms) { drain; false }
       end
     end
   end
@@ -341,8 +337,7 @@ class App
         s = parsed.is_a?(Hash) ? parsed["data"] : nil
         next unless s.is_a?(Hash)
         s["id"] ||= id
-        @pending << lambda { apply_update(s) }
-        Ascaridol.add_timer(0.ms) { drain; false }
+        apply_update(s)
       end
     end
   end
@@ -363,8 +358,7 @@ class App
       buf << chunk
       s = JSON.parse(buf) rescue next
       next unless s.is_a?(Hash) && s["type"] == "story"
-      @pending << lambda { apply_update(s) }
-      Ascaridol.add_timer(0.ms) { drain; false }
+      apply_update(s)
     end
   end
 
@@ -417,21 +411,17 @@ class App
     end
   end
 
-  def drain
-    until @pending.empty?
-      op = @pending.shift
-      begin
-        op.call
-      rescue => e
-        $stderr.puts "pending op error: #{e.class}: #{e.message}"
-      end
-    end
+def drain
+  until @pending.empty?
+    @pending.shift.call
   end
+end
 
   # ----- Rendering ----------------------------------------------------------
 
   def render_story(s)
     return unless s && s["id"]
+    $stderr.puts "render_story id=#{s["id"]} title=#{(s["title"] || "?")[0..40]}"
     html_one = story_html(s)
     escaped  = html_one.gsub("\\", "\\\\\\\\").gsub("`", "\\`").gsub("$", "\\$")
     Ascaridol.eval(<<~JS)
@@ -520,7 +510,13 @@ class App
     Ascaridol.bind(:route) do |method, path, _params|
       uri     = URI.parse("https://localhost#{path}")
       bare    = uri.path
-      qparams = uri.query_hash || {}
+      qparams = {}
+      if uri.has_query?
+        uri.query.split("&").each do |pair|
+          k, v = pair.split("=", 2)
+          qparams[URI.decode(k)] = v ? URI.decode(v) : ""
+        end
+      end
 
       if method == "POST" && bare.start_with?("/open/")
         id  = bare[6..].to_i

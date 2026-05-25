@@ -478,14 +478,14 @@ ascaridol_parse_readiness(mrb_state* mrb, mrb_value v)
     if (mrb_nil_p(v) || mrb_undef_p(v)) return ASCARIDOL_FD_READ;
     if (!mrb_symbol_p(v)) {
         mrb_raise(mrb, E_TYPE_ERROR,
-            "readiness must be a Symbol (:r, :w, :rw)");
+            "readiness must be a Symbol (:in, :out, :inout)");
     }
     mrb_sym s = mrb_symbol(v);
-    if (s == MRB_SYM(r))  return ASCARIDOL_FD_READ;
-    if (s == MRB_SYM(w))  return ASCARIDOL_FD_WRITE;
-    if (s == MRB_SYM(rw)) return ASCARIDOL_FD_READ | ASCARIDOL_FD_WRITE;
+    if (s == MRB_SYM(in))    return ASCARIDOL_FD_READ;
+    if (s == MRB_SYM(out))   return ASCARIDOL_FD_WRITE;
+    if (s == MRB_SYM(inout)) return ASCARIDOL_FD_READ | ASCARIDOL_FD_WRITE;
     mrb_raisef(mrb, E_ARGUMENT_ERROR,
-        "invalid readiness %n (want :r, :w, or :rw)", s);
+        "invalid readiness %n (want :in, :out, or :inout)", s);
     return 0;
 }
 
@@ -495,9 +495,9 @@ ascaridol_cond_to_sym(unsigned int conds)
     if (conds & ASCARIDOL_FD_ERROR) return MRB_SYM(err);
     bool r = (conds & ASCARIDOL_FD_READ)  != 0;
     bool w = (conds & ASCARIDOL_FD_WRITE) != 0;
-    if (r && w) return MRB_SYM(rw);
-    if (w)      return MRB_SYM(w);
-    return MRB_SYM(r);
+    if (r && w) return MRB_SYM(inout);
+    if (w)      return MRB_SYM(out);
+    return MRB_SYM(in);
 }
 
 static mrb_value
@@ -620,15 +620,17 @@ mrb_ascaridol_watcher_remove(mrb_state* mrb, mrb_value self)
 }
 
 void
-ascaridol_remove_native_event_on_main(mrb_state* mrb, webview::webview* /*wv*/,
+ascaridol_remove_native_event_on_main(mrb_state* mrb, webview::webview*,
     mrb_value fd_obj)
 {
     mrb_value fh = fds_hash(mrb);
     mrb_value ud_obj = mrb_hash_fetch(mrb, fh, fd_obj, mrb_undef_value());
     if (mrb_undef_p(ud_obj)) return;
     auto* ud = mrb_cpp_get<mrb_ascaridol_fd_ud>(mrb, ud_obj);
-    g_source_remove(ud->id);
-    ud->id = 0;
+    if (ud && ud->id) {
+        g_source_remove(ud->id);
+        ud->id = 0;
+    }
     mrb_hash_delete_key(mrb, fh, fd_obj);
 }
 
@@ -2769,6 +2771,17 @@ struct WSAGuard {
 /* ========================================================================= */
 /* main()                                                                    */
 /* ========================================================================= */
+#include <mruby/debug.h>
+static void
+trace_fetch(mrb_state* mrb, const struct mrb_irep* irep,
+            const mrb_code* pc, mrb_value* /*regs*/)
+{
+    const char* file = mrb_debug_get_filename(mrb, irep, (uint32_t)(pc - irep->iseq));
+    int32_t line     = mrb_debug_get_line(mrb, irep, (uint32_t)(pc - irep->iseq));
+    if (file && line >= 0) {
+        fprintf(stderr, "[trace] %s:%d\n", file, line);
+    }
+}
 
 int
 main(const int argc, const char* const argv[])
@@ -2788,6 +2801,7 @@ main(const int argc, const char* const argv[])
     mrb_state* mrb = mrb_open();
     if (!mrb) return 1;
     g_main_mrb.store(mrb, std::memory_order_release);
+    mrb->code_fetch_hook = trace_fetch;
 
     int exit_code = 0;
 
