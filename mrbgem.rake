@@ -12,7 +12,6 @@ MRuby::Gem::Specification.new('ascaridol') do |spec|
   spec.add_dependency 'mruby-lmdb'
   spec.add_dependency 'mruby-uri-parser'
   spec.add_dependency 'mruby-mustache', github: 'Asmod4n/mruby-mustache', branch: 'main'
-  spec.add_dependency 'mruby-url', github: 'Asmod4n/mruby-url', branch: 'main'
   spec.add_dependency 'typedargs'
   spec.add_dependency 'mruby-proc-irep-ext'
   spec.add_dependency 'mruby-chrono'
