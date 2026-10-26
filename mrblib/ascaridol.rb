@@ -48,11 +48,18 @@ module Ascaridol
     #   end
     #
     # The bind name must be a plain ASCII JS identifier.
-    def htmx(bind_name)
+    #
+    # prefix is htmx.config.prefix, the second prefix that htmx reads
+    # beside hx-. The empty default makes htmx read hx- names only;
+    # prefix: "data-hx-" gives back the htmx default.
+    def htmx(bind_name, prefix: "")
       name = bind_name.to_s
       raise ArgumentError, "htmx bind name must be a JS identifier" \
         unless js_identifier?(name)
-      HTMX_CONFIG + "<script>#{HTMX_SOURCE}</script>" +
+      raise ArgumentError, "htmx prefix must hold only a-z, 0-9 and -" \
+        unless html_attribute_prefix?(prefix)
+      HTMX_CONFIG_TEMPLATE.render({ prefix: prefix }) +
+        "<script>#{HTMX_SOURCE}</script>" +
         HTMX_EXTENSION_TEMPLATE.render({ bind_name: name })
     end
 
@@ -76,6 +83,12 @@ module Ascaridol
     end
 
     private
+
+    def html_attribute_prefix?(s)
+      s.is_a?(String) && s.each_char.all? do |c|
+        (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'
+      end
+    end
 
     def js_identifier?(s)
       return false if s.empty?
@@ -124,7 +137,8 @@ module Ascaridol
       JS
     end
 
-    HTMX_CONFIG = %q(<meta name="htmx-config" content='{"history":false}'>)
+    HTMX_CONFIG_TEMPLATE = Mustache::Template.compile(
+      %q(<meta name="htmx-config" content='{"history":false,"prefix":"{{prefix}}"}'>))
 
     HTMX_EXTENSION_TEMPLATE = Mustache::Template.compile(<<~'JS')
     <script>

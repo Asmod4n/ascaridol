@@ -338,6 +338,11 @@ works only when the same page is served over HTTP. Without the
 binding, as on such a page, the extension leaves every request to
 htmx and the network.
 
+`Ascaridol.htmx` sets the htmx prefix to `""`, so htmx reads `hx-`
+names only and no `data-hx-` names. Each request then takes less time.
+`Ascaridol.htmx(:route, prefix: "data-hx-")` gives back the htmx
+default.
+
 ## Threading model
 
 mruby is single-threaded. Only the main thread ever touches Ascaridol's
