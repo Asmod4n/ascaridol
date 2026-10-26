@@ -207,9 +207,9 @@ SOURCES = {
   'not_found' => %(<p class="err">404 {{method}} {{path}}</p>),
 }
 
-TPL = SOURCES.transform_values { |src| Mustache::Template.compile(src) }
+TPL = SOURCES.each_with_object({}) { |(name, src), tpl| tpl[name.to_sym] = Mustache::Template.compile(src) }
 
-def render(name, data = nil) = TPL.fetch(name).render(data, TPL)
+def render(name, data = nil) = TPL.fetch(name.to_sym).render(data, TPL)
 
 # ---------------------------------------------------------------------------
 # View-data prep

@@ -49,7 +49,7 @@ module Ascaridol
       name = bind_name.to_s
       raise ArgumentError, "router bind name must be a JS identifier" \
         unless js_identifier?(name)
-      ROUTER_TEMPLATE.render('route_fn' => name)
+      ROUTER_TEMPLATE.render({ route_fn: name })
     end
 
     # Wrap C-level Ascaridol.bind to also inject the JS error shim. Calling
