@@ -288,10 +288,11 @@ already gone; nothing propagates back.
 | `Ascaridol.platform`             | Platform identifier Symbol.                                   |
 | `Ascaridol.handle(kind=:window)` | Native handle by kind — `:window`, `:widget`, or `:browser_controller`. Main only. |
 
-## The `rb-*` router
+## htmx
 
-htmx-style attribute router for form-driven UIs. Drop the generated
-`<script>` into `<head>`:
+Ascaridol carries [htmx](https://htmx.org) 4.0.0 in `vendor/htmx` and an
+htmx extension that sends each request to a bound Ruby block instead of
+the network. Drop `Ascaridol.htmx` into `<head>`:
 
 ```ruby
 Ascaridol.run do |h|
@@ -303,23 +304,39 @@ Ascaridol.run do |h|
   end
 
   h.html = <<~HTML
-    <head>#{Ascaridol.html_router(:route)}</head>
+    <head>#{Ascaridol.htmx(:route)}</head>
     <body>
-      <button rb-get="/users" rb-target="#users">load</button>
+      <button hx-get="/users" hx-target="#users">load</button>
       <div id="users"></div>
     </body>
   HTML
 end
 ```
 
-Attributes: `rb-get`/`rb-post`/`rb-put`/`rb-patch`/`rb-delete` (verb +
-path), `rb-target` (CSS selector), `rb-swap` (`innerHTML` /
-`outerHTML`), `rb-trigger` (`"input changed delay:200ms, click"`),
-`rb-vals` (JSON merged into params), `rb-indicator` (CSS selector
-marked `.busy` during requests).
+Every `hx-*` attribute of htmx 4 works. The block gets the method, the
+path and the params, and returns one of these:
 
-Forms harvest named fields automatically. Lone controls contribute
-their name/value. `rb-vals` overrides both.
+- an HTML String: status 200, swapped as usual;
+- `[status, html]`: htmx 4 swaps 4xx and 5xx too;
+- `nil`, or a status 204, 205 or 304: nothing is swapped.
+
+A block that raises gives status 500 with the escaped message in
+`<div class="error">`.
+
+What htmx sends as params:
+
+- GET and DELETE send the query and the values of the element.
+- POST, PUT and PATCH send the enclosing form, so an input inside a
+  form sends the whole form. `hx-vals` overrides both.
+- A file input cannot cross to Ruby, and the request ends with the
+  500 response.
+
+htmx shows `htmx-request` on the `hx-indicator` element during a
+request, and `hx-disable` disables elements. The page has no URL of
+its own, so `Ascaridol.htmx` turns htmx history off, and `hx-push-url`
+works only when the same page is served over HTTP. Without the
+binding, as on such a page, the extension leaves every request to
+htmx and the network.
 
 ## Threading model
 

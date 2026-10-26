@@ -13,7 +13,7 @@
 #   - Server-rendered tab switching (no client state)
 #   - Modal dialogs composed from HTML fragments
 #   - Pre-compiled Mustache templates as partials
-#   - rb-swap variants: outerHTML, beforeend, and synthetic delete
+#   - hx-swap variants: outerHTML, beforeend, and delete
 #
 # mruby-mustache is a transitive dep of ascaridol-mrb — no extra conf.gem needed.
 
@@ -125,7 +125,7 @@ CSS
 SOURCES = {
   'page' => <<~MUSTACHE,
     <!doctype html><html><head><meta charset="utf-8"><title>tabs + modals</title>
-    {{{router_script}}}<style>{{{css}}}</style></head>
+    {{{htmx_script}}}<style>{{{css}}}</style></head>
     <body><h1>TABS + MODALS x MRUBY</h1>
     {{{main}}}
     </body></html>
@@ -135,7 +135,7 @@ SOURCES = {
     <main id="main">
       <nav class="tabs">
         {{#tabs}}
-        <button class="tab{{#active}} active{{/active}}" rb-get="/tab/{{id}}" rb-target="#main" rb-swap="outerHTML">{{label}}</button>
+        <button class="tab{{#active}} active{{/active}}" hx-get="/tab/{{id}}" hx-target="#main" hx-swap="outerHTML">{{label}}</button>
         {{/tabs}}
       </nav>
       <div class="panel">{{{body}}}</div>
@@ -152,16 +152,16 @@ SOURCES = {
 
   'project_row' => <<~MUSTACHE,
     <tbody class="proj" id="row-{{id}}">
-      <tr class="row{{#expanded}} expanded{{/expanded}}" rb-get="{{toggle_url}}" rb-target="#row-{{id}}" rb-swap="outerHTML">
+      <tr class="row{{#expanded}} expanded{{/expanded}}" hx-get="{{toggle_url}}" hx-target="#row-{{id}}" hx-swap="outerHTML">
         <td>{{name}}</td>
         <td><span class="pill {{status}}">{{status}}</span></td>
         <td>{{owner}}</td>
         <td class="actions">
-          <button rb-get="/project/{{id}}/delete-confirm" rb-target="body" rb-swap="beforeend" onclick="event.stopPropagation()">DELETE</button>
+          <button hx-get="/project/{{id}}/delete-confirm" hx-target="body" hx-swap="beforeend" onclick="event.stopPropagation()">DELETE</button>
         </td>
       </tr>
       {{#expanded}}
-      <tr class="detail" rb-get="/project/{{id}}/collapse" rb-target="#row-{{id}}" rb-swap="outerHTML">
+      <tr class="detail" hx-get="/project/{{id}}/collapse" hx-target="#row-{{id}}" hx-swap="outerHTML">
         <td colspan="4">
           <strong class="accent">{{name}}</strong> &mdash; owned by {{owner}} · status {{status}}<br>
           <span class="muted">{{desc}}</span>
@@ -186,18 +186,18 @@ SOURCES = {
   'about' => <<~MUSTACHE,
     <div class="about">
       <p>Tabs and modals composed entirely from server-rendered HTML fragments.</p>
-      <p>No client state, no JSON wire format &mdash; just Ruby returning HTML for every interaction. Templates are compiled <code>Mustache::Template</code> objects; the custom router supplies <code>afterend</code>, <code>beforeend</code>, and a synthetic <code>delete</code> swap.</p>
+      <p>No client state, no JSON wire format &mdash; just Ruby returning HTML for every interaction. Templates are compiled <code>Mustache::Template</code> objects; htmx supplies the <code>beforeend</code>, <code>outerHTML</code> and <code>delete</code> swaps.</p>
     </div>
   MUSTACHE
 
   'delete_modal' => <<~MUSTACHE,
-    <div id="modal" class="scrim" rb-get="" rb-trigger="click" rb-target="#modal" rb-swap="delete">
+    <div id="modal" class="scrim" hx-on:click="this.remove()">
       <div class="modal" onclick="event.stopPropagation()">
         <h3>DELETE PROJECT</h3>
         <p>Permanently delete <strong class="accent">{{name}}</strong>? This cannot be undone.</p>
         <div class="row-buttons">
           <button onclick="document.getElementById('modal').remove()">CANCEL</button>
-          <button class="danger" rb-delete="/project/{{id}}" rb-target="#main" rb-swap="outerHTML"
+          <button class="danger" hx-delete="/project/{{id}}" hx-target="#main" hx-swap="outerHTML"
                   onclick="setTimeout(function(){var m=document.getElementById('modal');if(m)m.remove();},0)">DELETE</button>
         </div>
       </div>
@@ -241,7 +241,7 @@ end
 
 def page_html
   render('page',
-         router_script: Ascaridol.html_router(:route),
+         htmx_script: Ascaridol.htmx(:route),
          css:           CSS,
          main:          main_html('projects'))
 end

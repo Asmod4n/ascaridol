@@ -172,5 +172,13 @@ MRuby::Gem::Specification.new('ascaridol') do |spec|
       spec.cxx.flags << '-std=c++20'
   end
 
+  htmx_js  = File.read(File.join(spec.dir, 'vendor', 'htmx', 'htmx.min.js'))
+  abort '[ascaridol] htmx.min.js holds the line HTMX_SOURCE' if htmx_js.lines.any? { |l| l.chomp == 'HTMX_SOURCE' }
+  htmx_rb  = File.join(build.build_dir, 'mrbgems', spec.name, 'htmx_source.rb')
+  htmx_src = "module Ascaridol\n  HTMX_SOURCE = <<'HTMX_SOURCE'\n#{htmx_js}\nHTMX_SOURCE\nend\n"
+  FileUtils.mkdir_p(File.dirname(htmx_rb))
+  File.write(htmx_rb, htmx_src) unless File.exist?(htmx_rb) && File.read(htmx_rb) == htmx_src
+  spec.rbfiles << htmx_rb
+
   spec.bins = %w(ascaridol)
 end

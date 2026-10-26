@@ -5,8 +5,8 @@
 # Ascaridol itself (the C side) provides Ascaridol.run, Ascaridol.bind, Ascaridol.html=,
 # Ascaridol.dispatch, etc. This file adds:
 #
-#   - Ascaridol.html_router(name): a <script> string that wires
-#     rb-{get,post,put,patch,delete} attributes to a Ruby-bound function.
+#   - Ascaridol.htmx(name): htmx 4 and an htmx extension that sends each
+#     request to a Ruby-bound function instead of the network.
 #
 #   - A Ruby-level Ascaridol.bind wrapper that, in addition to registering the
 #     binding, injects a small JS shim so JavaScript callers see real Error
@@ -36,20 +36,24 @@ end
 
 module Ascaridol
   class << self
-    # Returns a <script> block that wires rb-{get,post,put,patch,delete}
-    # attributes in the page to a Ruby-bound function. Drop it into <head>.
+    # Returns htmx 4 and the extension for <head>. Each hx-get, hx-post,
+    # hx-put, hx-patch and hx-delete calls the Ruby function bound under
+    # bind_name with (method, path, params). The block returns an HTML
+    # String, [status, html] or nil. Without the binding, as over HTTP,
+    # the extension leaves htmx to the network.
     #
     #   Ascaridol.run do |h|
     #     h.bind(:route) { |method, path, params| render_page(method, path, params) }
-    #     h.html = "<head>#{Ascaridol.html_router(:route)}</head>..."
+    #     h.html = "<head>#{Ascaridol.htmx(:route)}</head>..."
     #   end
     #
     # The bind name must be a plain ASCII JS identifier.
-    def html_router(bind_name)
+    def htmx(bind_name)
       name = bind_name.to_s
-      raise ArgumentError, "router bind name must be a JS identifier" \
+      raise ArgumentError, "htmx bind name must be a JS identifier" \
         unless js_identifier?(name)
-      ROUTER_TEMPLATE.render({ route_fn: name })
+      HTMX_CONFIG + "<script>#{HTMX_SOURCE}</script>" +
+        HTMX_EXTENSION_TEMPLATE.render({ bind_name: name })
     end
 
     # Wrap C-level Ascaridol.bind to also inject the JS error shim. Calling
@@ -120,135 +124,78 @@ module Ascaridol
       JS
     end
 
-    # rb-{verb} attribute router. The bind name is templated in via Mustache
-    # so users can pick whatever they want for the Ruby-side function.
-    # Compiled once at load.
-    ROUTER_TEMPLATE = Mustache::Template.compile(<<~'JS')
+    HTMX_CONFIG = %q(<meta name="htmx-config" content='{"history":false}'>)
+
+    HTMX_EXTENSION_TEMPLATE = Mustache::Template.compile(<<~'JS')
     <script>
       (function () {
-        var ROUTE = window.{{route_fn}};
-        var SEL = '[rb-get],[rb-post],[rb-put],[rb-patch],[rb-delete]';
-        var VERBS = ['get', 'post', 'put', 'patch', 'delete'];
+        var BRIDGE_BASE = 'http://ascaridol.invalid/';
+        var NO_BODY = [204, 205, 304];
 
-        function methodAndPath(elt) {
-          for (var i = 0; i < VERBS.length; i++) {
-            if (elt.hasAttribute('rb-' + VERBS[i])) {
-              return { method: VERBS[i].toUpperCase(),
-                       path: elt.getAttribute('rb-' + VERBS[i]) };
+        function bridge() { return window['{{bind_name}}']; }
+
+        function escapeHtml(s) {
+          return String(s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+          });
+        }
+
+        function paramsOf(action, body) {
+          var url = new URL(action, BRIDGE_BASE);
+          var params = Object.fromEntries(url.searchParams);
+          if (body) {
+            var fields = body instanceof FormData ? body : new URLSearchParams(body);
+            for (var [k, v] of fields) {
+              if (typeof v !== 'string')
+                throw new TypeError('ascaridol: a file cannot be sent to Ruby');
+              params[k] = v;
             }
           }
+          return { path: url.pathname, params: params };
         }
 
-        function parseDuration(s) {
-          var m = /^(\d+(?:\.\d+)?)(ms|s)?$/.exec(s || '');
-          if (!m) return 0;
-          var n = parseFloat(m[1]);
-          return m[2] === 's' ? n * 1000 : n;
+        function responseOf(result) {
+          var status = 200, body = result;
+          if (Array.isArray(result)) { status = result[0]; body = result[1]; }
+          if (NO_BODY.indexOf(status) >= 0) return new Response(null, { status: status });
+          if (body == null) return new Response(null, { status: 204 });
+          return new Response(String(body), { status: status, headers: { 'Content-Type': 'text/html' } });
         }
 
-        // 'input changed delay:200ms, click'
-        //   -> [{event:'input',changed:true,delay:200},{event:'click'}]
-        function parseTriggers(spec, defaultEv) {
-          if (!spec) return [{ event: defaultEv }];
-          return spec.split(/\s*,\s*/).map(function (chunk) {
-            var parts = chunk.trim().split(/\s+/);
-            var t = { event: parts[0] };
-            for (var i = 1; i < parts.length; i++) {
-              var p = parts[i], c = p.indexOf(':');
-              if (c >= 0) {
-                var key = p.slice(0, c), val = p.slice(c + 1);
-                if (key === 'delay') t.delay = parseDuration(val);
-              } else {
-                t[p] = true; // 'changed', 'once', ...
+        function errorResponseOf(err) {
+          var message = err && err.message ? err.message : String(err);
+          return new Response("<div class='error'>" + escapeHtml(message) + "</div>",
+                              { status: 500, headers: { 'Content-Type': 'text/html' } });
+        }
+
+        function abortOf(signal) {
+          return new Promise(function (_, reject) {
+            var abort = function () { reject(new DOMException('aborted', 'AbortError')); };
+            if (signal.aborted) abort();
+            else signal.addEventListener('abort', abort);
+          });
+        }
+
+        htmx.registerExtension('ascaridol', {
+          htmx_config_request: function (elt, detail) {
+            if (typeof bridge() !== 'function') return;
+            detail.ctx.request.action = new URL(detail.ctx.request.action, BRIDGE_BASE).href;
+          },
+          htmx_before_request: function (elt, detail) {
+            if (typeof bridge() !== 'function') return;
+            detail.ctx.fetch = function (action, req) {
+              var call;
+              try {
+                var r = paramsOf(action, req.body);
+                call = Promise.resolve(bridge()(req.method, r.path, r.params))
+                  .then(responseOf, errorResponseOf);
+              } catch (e) {
+                call = Promise.resolve(errorResponseOf(e));
               }
-            }
-            return t;
-          });
-        }
-
-        function dispatch(elt, e) {
-          if (e && e.preventDefault) e.preventDefault();
-          var mp = methodAndPath(elt); if (!mp) return;
-
-          var params = {};
-
-          // 1. Lone form-control: contribute its own name/value first so an
-          //    explicit rb-vals can still override it.
-          if (elt.tagName !== 'FORM' && elt.name && 'value' in elt) {
-            params[elt.name] = elt.value;
+              return Promise.race([call, abortOf(req.signal)]);
+            };
           }
-          // 2. FORM: harvest every named field.
-          if (elt.tagName === 'FORM') {
-            new FormData(elt).forEach(function (v, k) { params[k] = v; });
-          }
-          // 3. rb-vals JSON wins over both.
-          var raw = elt.getAttribute('rb-vals');
-          if (raw) try { Object.assign(params, JSON.parse(raw)); } catch (_) {}
-
-          var targetSel = elt.getAttribute('rb-target');
-          var target    = targetSel ? document.querySelector(targetSel) : elt;
-          var swap      = elt.getAttribute('rb-swap') || 'innerHTML';
-          var indSel    = elt.getAttribute('rb-indicator');
-          var ind       = indSel ? document.querySelector(indSel) : null;
-
-          if (ind) ind.classList.add('busy');
-          elt.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
-
-          ROUTE(mp.method, mp.path, params).then(function (html) {
-              if (swap === 'delete')          { target.remove(); }
-              else if (swap === 'outerHTML')  { target.outerHTML = html; }
-              else if (swap === 'innerHTML' || !swap) { target.innerHTML = html; }
-              else                            { target.insertAdjacentHTML(swap, html); }
-            }).catch(function (err) {
-            target.innerHTML = "<div class='error'>" +
-              (err && err.message ? err.message : String(err)) + "</div>";
-          }).finally(function () {
-            if (ind) ind.classList.remove('busy');
-            elt.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
-          });
-        }
-
-        function wire(root) {
-          root.querySelectorAll(SEL).forEach(function (elt) {
-            if (elt.__rb_wired) return;
-            elt.__rb_wired = true;
-
-            var defaultEv =
-              elt.tagName === 'FORM' ? 'submit' :
-              (elt.tagName === 'INPUT' || elt.tagName === 'TEXTAREA' ||
-               elt.tagName === 'SELECT') ? 'change' : 'click';
-
-            var triggers = parseTriggers(elt.getAttribute('rb-trigger'), defaultEv);
-
-            triggers.forEach(function (t) {
-              if (t.event === 'load') { dispatch(elt); return; }
-
-              var lastValue = ('value' in elt) ? elt.value : undefined;
-              var timer = null;
-
-              elt.addEventListener(t.event, function (e) {
-                if (t.changed) {
-                  var v = elt.value;
-                  if (v === lastValue) return;
-                  lastValue = v;
-                }
-                if (t.delay) {
-                  clearTimeout(timer);
-                  timer = setTimeout(function () { dispatch(elt, e); }, t.delay);
-                } else {
-                  dispatch(elt, e);
-                }
-              });
-            });
-          });
-        }
-
-        document.addEventListener('DOMContentLoaded', function () { wire(document); });
-        new MutationObserver(function (muts) {
-          muts.forEach(function (m) { m.addedNodes.forEach(function (n) {
-            if (n.nodeType === 1) wire(n);
-          }); });
-        }).observe(document.documentElement, { childList: true, subtree: true });
+        });
       })();
     </script>
     JS

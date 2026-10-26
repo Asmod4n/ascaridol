@@ -10,7 +10,7 @@
 #   mruby/build/host/bin/ascaridol
 #
 # Demonstrates:
-#   - rb-indicator: busy bar shown while a Ruby binding runs
+#   - hx-indicator: busy bar shown while a Ruby binding runs
 #   - Long-running work (a benchmark loop) without locking the UI
 #   - Structured output: status pill + headers-style key/value panel
 #   - Surfacing exceptions raised from Ruby as visible errors
@@ -74,7 +74,7 @@ def benchmark(target_ms)
 end
 
 
-# ---- htmx router ----------------------------------------------------------
+# ---- htmx ----------------------------------------------------------------
 
 CSS = <<~'CSS'
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -114,7 +114,7 @@ CSS = <<~'CSS'
   input:focus, textarea:focus { border-color: #444; }
 
   .indicator { height: 2px; background: transparent; margin: .8rem 0 0 0; overflow: hidden; }
-  .indicator.busy {
+  .indicator.htmx-request {
     background: linear-gradient(90deg, transparent, #c8f542, transparent);
     background-size: 40% 100%; background-repeat: no-repeat;
     animation: slide 1.1s linear infinite;
@@ -189,8 +189,8 @@ end
 
 def render_bench_form(default_ms = 200)
   <<~HTML
-    <form id="bench-form" rb-post="/bench" rb-target="#bench-result" rb-swap="outerHTML"
-          rb-indicator="#bench-indicator">
+    <form id="bench-form" hx-post="/bench" hx-target="#bench-result" hx-swap="outerHTML"
+          hx-indicator="#bench-indicator" hx-disable="find button">
       <div class="form-row">
         <label class="timing">RUN FOR</label>
         <input type="number" name="ms" value="#{default_ms}" min="50" max="5000" step="50">
@@ -228,7 +228,7 @@ def render_bench_panel
       #{render_bench_result(nil)}
       #{render_bench_form}
       <p class="timing" style="margin-top:.8rem">
-        Demonstrates rb-indicator while the Ruby block runs.
+        Demonstrates hx-indicator while the Ruby block runs.
         The UI stays responsive because webview's bind awaits a JS promise.
       </p>
     </div>
@@ -240,7 +240,7 @@ end
 def render_page(w_bindings)
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>dashboard</title>
-    #{Ascaridol.html_router(:route)}<style>#{CSS}</style></head>
+    #{Ascaridol.htmx(:route)}<style>#{CSS}</style></head>
     <body><h1>MRUBY-WEBVIEW DASHBOARD</h1>
     <div class="grid">
       #{render_webview_panel}

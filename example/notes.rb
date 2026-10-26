@@ -16,7 +16,7 @@
 #   - A real, persistent app: notes survive restarts
 #   - LMDB for storage, CBOR for the on-disk note format
 #   - Mustache templates compiled once at load, all rendering goes through them
-#   - Debounced search-as-you-type via rb-trigger="input changed delay:200ms"
+#   - Debounced search-as-you-type via hx-trigger="input changed delay:200ms"
 #   - Master/detail layout where edits round-trip through Ruby
 DB_DIR = "./mruby-webview-notes"
 
@@ -145,22 +145,22 @@ CSS
 #
 # All HTML output goes through these. Templates are compiled once at load.
 # Mustache `{{var}}` HTML-escapes by default; use `{{{var}}}` for trusted
-# pre-rendered HTML fragments (CSS, router script, nested template output).
+# pre-rendered HTML fragments (CSS, htmx script, nested template output).
 
 SOURCES = {
   'page' => <<~MUSTACHE,
     <!doctype html><html><head><meta charset="utf-8"><title>notes</title>
-    #{Ascaridol.html_router(:route)}<style>#{CSS}</style></head>
+    #{Ascaridol.htmx(:route)}<style>#{CSS}</style></head>
     <body>
     {{^has_deps}}<div class="dep-banner">mruby-lmdb / mruby-cbor not loaded — running in read-only demo mode</div>{{/has_deps}}
     <header>
       <h1>NOTES x MRUBY</h1>
       <input class="search" type="text" name="q" placeholder="search..."
              autocomplete="off"
-             rb-get="/search"
-             rb-trigger="input changed delay:200ms"
-             rb-target="#main" rb-swap="outerHTML">
-      <button rb-post="/note" rb-target="#main" rb-swap="outerHTML">+ NEW</button>
+             hx-get="/search"
+             hx-trigger="input changed delay:200ms"
+             hx-target="#main" hx-swap="outerHTML">
+      <button hx-post="/note" hx-target="#main" hx-swap="outerHTML">+ NEW</button>
     </header>
     {{{main}}}
     </body></html>
@@ -175,27 +175,27 @@ SOURCES = {
   MUSTACHE
 
   'item' => <<~'MUSTACHE',
-    <div class="{{item_class}}" rb-get="/note/{{id}}" rb-target="#main" rb-swap="outerHTML"><div class="t">{{display_title}}</div><div class="p">{{preview}}</div></div>
+    <div class="{{item_class}}" hx-get="/note/{{id}}" hx-target="#main" hx-swap="outerHTML"><div class="t">{{display_title}}</div><div class="p">{{preview}}</div></div>
   MUSTACHE
 
   'editor' => <<~'MUSTACHE',
     <section class="editor" id="editor">
       <input class="ti" name="title" value="{{title}}"
              placeholder="untitled"
-             rb-put="/note/{{id}}"
-             rb-vals='{"id":"{{id}}"}'
-             rb-trigger="input changed delay:300ms"
-             rb-target="#list" rb-swap="outerHTML">
+             hx-put="/note/{{id}}"
+             hx-vals='{"id":"{{id}}"}'
+             hx-trigger="input changed delay:300ms"
+             hx-target="#list" hx-swap="outerHTML">
       <textarea name="body" placeholder="start writing..."
-                rb-put="/note/{{id}}"
-                rb-vals='{"id":"{{id}}"}'
-                rb-trigger="input changed delay:400ms"
-                rb-target="#list" rb-swap="outerHTML">{{body}}</textarea>
+                hx-put="/note/{{id}}"
+                hx-vals='{"id":"{{id}}"}'
+                hx-trigger="input changed delay:400ms"
+                hx-target="#list" hx-swap="outerHTML">{{body}}</textarea>
       <div class="bar">
         <span>SAVED · {{display_ts}}</span>
         <button class="del"
-                rb-delete="/note/{{id}}"
-                rb-target="#main" rb-swap="outerHTML">DELETE</button>
+                hx-delete="/note/{{id}}"
+                hx-target="#main" hx-swap="outerHTML">DELETE</button>
       </div>
     </section>
   MUSTACHE

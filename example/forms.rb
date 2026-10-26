@@ -10,12 +10,12 @@
 #   mruby/build/host/bin/ascaridol
 #
 # Demonstrates:
-#   - Inline field validation (rb-post on input blur)
+#   - Inline field validation (hx-post on input blur)
 #   - Multi-target swaps (errors -> field, summary -> footer)
 #   - Form submit with full-form replace on success
 #   - Server-driven password strength meter
 #
-# Ascaridol's html_router handles `rb-trigger="blur"` so individual fields
+# htmx handles `hx-trigger="blur"` so individual fields
 # can validate themselves without wiring custom JS.
 
 $users = ["alice", "bob"] # already-taken handles
@@ -70,10 +70,10 @@ def render_username_field(name = "", state = nil)
       <label>HANDLE</label>
       <input type="text" name="username" value="#{name}" class="#{cls}"
              autocomplete="off"
-             rb-post="/validate/username"
-             rb-trigger="blur"
-             rb-target="#username-field"
-             rb-swap="outerHTML">
+             hx-post="/validate/username"
+             hx-trigger="blur"
+             hx-target="#username-field"
+             hx-swap="outerHTML">
       #{msg}
     </div>
   HTML
@@ -98,10 +98,10 @@ def render_password_field(pw = "")
     <div class="field" id="password-field">
       <label>PASSWORD</label>
       <input type="password" name="password" value="#{pw}"
-             rb-post="/validate/password"
-             rb-trigger="input"
-             rb-target="#password-meter"
-             rb-swap="outerHTML">
+             hx-post="/validate/password"
+             hx-trigger="input"
+             hx-target="#password-meter"
+             hx-swap="outerHTML">
       #{render_password_meter(pw)}
     </div>
   HTML
@@ -120,7 +120,7 @@ end
 
 def render_form(state = {})
   <<~HTML
-    <form rb-post="/signup" rb-target="#card" rb-swap="outerHTML">
+    <form hx-post="/signup" hx-target="#card" hx-swap="outerHTML">
       #{render_username_field(state[:username] || "")}
       #{render_password_field(state[:password] || "")}
       <button type="submit">CREATE ACCOUNT</button>
@@ -136,7 +136,7 @@ end
 def render_page
   <<~HTML
     <!doctype html><html><head><meta charset="utf-8"><title>forms</title>
-    #{Ascaridol.html_router(:route)}<style>#{CSS}</style></head>
+    #{Ascaridol.htmx(:route)}<style>#{CSS}</style></head>
     <body><h1>FORMS x VALIDATION</h1>
     #{render_card(render_form)}
     </body></html>
