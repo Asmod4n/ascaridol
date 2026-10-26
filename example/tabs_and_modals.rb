@@ -222,6 +222,7 @@ end
 def project_view(p, expanded: false)
   return nil unless p
   p.merge(
+    id:         p[:id].to_s,
     expanded:   expanded,
     toggle_url: expanded ? "/project/#{p[:id]}/collapse" : "/project/#{p[:id]}/toggle",
   )
@@ -273,7 +274,7 @@ def route(method, path, _params)
     elsif (rest = path_after(path, '/project/'))
       id = leading_id(rest)
       p  = find_project(id)
-      if    rest.end_with?('/delete-confirm') then p && render('delete_modal', p)
+      if    rest.end_with?('/delete-confirm') then p && render('delete_modal', project_view(p))
       elsif rest.end_with?('/toggle')         then render('project_row', project_view(p, expanded: true))
       elsif rest.end_with?('/collapse')       then render('project_row', project_view(p))
       end
