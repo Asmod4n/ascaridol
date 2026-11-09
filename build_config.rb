@@ -7,6 +7,8 @@ MRuby::Build.new do |conf|
   #conf.enable_test
   conf.enable_debug
   conf.gem core: 'mruby-bin-mirb'
+  conf.gem core: 'mruby-fiber'
+  conf.gem core: 'mruby-enumerator'
   conf.gem(File.expand_path(File.dirname(__FILE__))) do |ascaridol|
     ascaridol.rbfiles << "../example/menu.rb"
   end
