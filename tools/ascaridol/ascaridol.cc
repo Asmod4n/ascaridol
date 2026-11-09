@@ -2326,9 +2326,9 @@ struct WSAGuard {
 #include <mruby/debug.h>
 #include <mruby/opcode.h>
 #include <mruby/irep.h>
+extern "C" {
 #include <mruby/internal.h>
-
-MRB_API struct mrb_insn_data mrb_insn_fetch(mrb_state*, const mrb_code*);
+}
 
 static void
 trace_fetch(mrb_state* mrb, const struct mrb_irep* irep,
